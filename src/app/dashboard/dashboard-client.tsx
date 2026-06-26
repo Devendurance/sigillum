@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { AgentDecision, Quote, SigillumReceipt } from "@/lib/sigillum/types";
 import { sampleRiskyDiff } from "@/lib/sigillum/sample-diff";
+import type { PaymentRequirement } from "@/lib/sigillum/payment/types";
 
 type DemoPhase =
   | "idle"
@@ -12,6 +13,10 @@ type DemoPhase =
   | "payment_confirming"
   | "inspecting"
   | "receipt_ready";
+
+type PaymentDisplayInfo = PaymentRequirement & {
+  payment_reference?: string;
+};
 
 const pipelineSteps = [
   "diff",
@@ -31,6 +36,7 @@ export function DashboardClient() {
   const [activeTab, setActiveTab] = useState<"summary" | "json">("summary");
   const [copyStatus, setCopyStatus] = useState<"idle" | "copied">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [paymentInfo, setPaymentInfo] = useState<PaymentDisplayInfo | null>(null);
 
   const receiptJson = useMemo(() => {
     if (!receipt) {
@@ -86,6 +92,7 @@ export function DashboardClient() {
     setPhase("quoting");
     setReceipt(null);
     setAgentDecision(null);
+    setPaymentInfo(null);
 
     const response = await fetch("/api/quote", {
       method: "POST",
@@ -141,18 +148,52 @@ export function DashboardClient() {
     });
 
     if (!response.ok) {
-      setErrorMessage("Inspection failed after payment confirmation.");
-      setPhase("quoted");
+      const body = (await response.json().catch(() => null)) as
+        | {
+            message?: string;
+            payment?: PaymentRequirement;
+            reason?: string;
+            error?: string;
+          }
+        | null;
+
+      if (body?.payment) {
+        setPaymentInfo(body.payment);
+      }
+
+      setErrorMessage(
+        body?.message ??
+          body?.reason ??
+          "x402 mode is selected, but payment verification is not configured yet.",
+      );
+      setPhase("payment_required");
       return;
     }
 
     const result = (await response.json()) as {
       receipt: SigillumReceipt;
       agent_decision: AgentDecision;
+      payment: {
+        mode: "demo" | "x402";
+        rail: "local-demo" | "x402";
+        payment_reference: string;
+      };
     };
 
     setReceipt(result.receipt);
     setAgentDecision(result.agent_decision);
+    setPaymentInfo({
+      status: "payment_required",
+      status_code: 402,
+      message: "HTTP 402 Payment Required",
+      network: "Arc",
+      rail: result.payment.rail,
+      currency: "USDC",
+      amount: quote.amount,
+      quote_id: quote.quote_id,
+      expires_at: quote.expires_at,
+      mode: result.payment.mode,
+    });
     setPhase("receipt_ready");
     setActiveTab("summary");
   }
@@ -167,7 +208,15 @@ export function DashboardClient() {
     window.setTimeout(() => setCopyStatus("idle"), 1200);
   }
 
-  const paymentGateVisible = phase === "payment_required" || phase === "payment_confirming" || phase === "inspecting" || phase === "receipt_ready";
+  const paymentGateVisible =
+    phase === "payment_required" ||
+    phase === "payment_confirming" ||
+    phase === "inspecting" ||
+    phase === "receipt_ready";
+  const paymentGateLabel =
+    paymentInfo?.mode === "x402"
+      ? "x402 payment adapter"
+      : "Local demo payment simulation";
 
   return (
     <main className="dashboard-shell">
@@ -213,13 +262,15 @@ export function DashboardClient() {
               <article className="payment-gate demo-gate">
                 <p>HTTP 402</p>
                 <strong>Payment Required</strong>
-                <span>Local demo payment simulation via x402-style flow</span>
+                <span>{paymentGateLabel}</span>
                 <div className="gate-meta">
-                  <span>Arc</span>
-                  <span>x402</span>
-                  <span>USDC</span>
-                  <span>{quote?.amount ?? "0.000043"}</span>
+                  <span>{paymentInfo?.network ?? "Arc"}</span>
+                  <span>{paymentInfo?.rail ?? "local-demo"}</span>
+                  <span>{paymentInfo?.mode ?? "demo"}</span>
+                  <span>{paymentInfo?.currency ?? "USDC"}</span>
+                  <span>{paymentInfo?.amount ?? quote?.amount ?? "0.000043"}</span>
                 </div>
+                {paymentInfo?.quote_id ? <span className="quote-chip">quote {paymentInfo.quote_id}</span> : null}
               </article>
             ) : null}
 
@@ -277,7 +328,9 @@ export function DashboardClient() {
               <p className="card-label">SEAL PREVIEW</p>
               <h3>Verified by Sigillum</h3>
               <p className="seal-copy">
-                Local demo receipt and agent decision are generated after payment confirmation.
+                {paymentInfo?.mode === "x402"
+                  ? "x402 mode selected, but payment verification is not configured yet."
+                  : "Local demo receipt and agent decision are generated after payment confirmation."}
               </p>
               <span className="seal-badge">Verified by Sigillum</span>
             </article>
@@ -338,6 +391,11 @@ export function DashboardClient() {
                   <span>{quote ? quote.amount : "--"}</span>
                   <p>USDC paid</p>
                 </div>
+              </div>
+              <div className="payment-meta-row">
+                <span>{paymentInfo?.mode ?? "demo"}</span>
+                <span>{paymentInfo?.rail ?? "local-demo"}</span>
+                <span>{paymentInfo?.payment_reference ?? "payment pending"}</span>
               </div>
 
               <div className="finding-panel">
@@ -499,6 +557,22 @@ export function DashboardClient() {
           flex-wrap: wrap;
           gap: 8px;
           margin-top: 14px;
+        }
+
+        .quote-chip,
+        .payment-meta-row span {
+          display: inline-flex;
+          min-height: 30px;
+          align-items: center;
+          border-radius: 999px;
+          padding: 0 10px;
+          border: 1px solid var(--border);
+          background: var(--paper);
+          color: var(--ink-2);
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0.1em;
+          text-transform: uppercase;
         }
 
         .gate-meta span,
@@ -686,6 +760,13 @@ export function DashboardClient() {
           margin-top: 20px;
         }
 
+        .payment-meta-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          margin-top: 14px;
+        }
+
         .decision-strip div {
           border: 1px solid var(--border);
           border-radius: 16px;
@@ -771,4 +852,3 @@ function pause(ms: number) {
     window.setTimeout(resolve, ms);
   });
 }
-

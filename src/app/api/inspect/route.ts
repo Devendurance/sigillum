@@ -4,41 +4,48 @@ import { generateSigillumReceipt } from "@/lib/sigillum/receipt";
 import { calculateQuote } from "@/lib/sigillum/quote";
 import { sampleRiskyDiff } from "@/lib/sigillum/sample-diff";
 import { evaluateAgentDecision } from "@/lib/sigillum/policy";
+import { verifySigillumPayment } from "@/lib/sigillum/payment";
 
 type InspectBody = {
   diff?: string;
   quote_id?: string;
   payment_confirmed?: boolean;
+  payment_proof?: string;
 };
 
 export async function POST(request: Request) {
   const body = await readJsonBody<InspectBody>(request);
   const diff = normalizeDiff(body.diff);
+  const quote = calculateQuote(diff);
+  const paymentVerification = await verifySigillumPayment({
+    amount: quote.amount,
+    quoteId: body.quote_id ?? quote.quote_id,
+    paymentConfirmed: body.payment_confirmed,
+    paymentProof: body.payment_proof,
+    expiresAt: quote.expires_at,
+  });
 
-  if (body.payment_confirmed !== true) {
-    // Local demo payment simulation: the app exposes the x402-style gate, but real payment wiring is not integrated yet.
+  if (!paymentVerification.ok) {
     return NextResponse.json(
       {
         error: "payment_required",
-        status: 402,
-        message: "HTTP 402 Payment Required",
-        payment: {
-          network: "Arc",
-          rail: "x402",
-          currency: "USDC",
-          amount: "0.000043",
-        },
+        status: paymentVerification.requirement.status_code,
+        message: paymentVerification.requirement.message,
+        payment: paymentVerification.requirement,
+        reason: paymentVerification.reason,
       },
       {
         status: 402,
         headers: {
-          "X-Sigillum-Mode": "local-demo-payment-simulation",
+          "X-Sigillum-Mode": paymentVerification.mode === "demo" ? "local-demo-payment-simulation" : "x402-payment-adapter",
+          "X-Sigillum-Payment-Mode": paymentVerification.mode,
+          "X-Sigillum-Payment-Rail": paymentVerification.rail,
+          "X-Sigillum-Quote-ID": paymentVerification.requirement.quote_id ?? quote.quote_id,
         },
       },
     );
   }
 
-  const quote = calculateQuote(diff);
   const findings = analyzeDiff(diff);
   const receipt = generateSigillumReceipt(diff, quote.amount);
   const agentDecision = evaluateAgentDecision(receipt.score, findings);
@@ -47,11 +54,18 @@ export async function POST(request: Request) {
     {
       receipt,
       agent_decision: agentDecision,
+      payment: {
+        mode: paymentVerification.mode,
+        rail: paymentVerification.rail,
+        payment_reference: paymentVerification.payment_reference,
+      },
     },
     {
       headers: {
-        "X-Sigillum-Mode": "local-demo-payment-simulation",
-        ...(body.quote_id ? { "X-Sigillum-Quote-ID": body.quote_id } : {}),
+        "X-Sigillum-Mode": paymentVerification.mode === "demo" ? "local-demo-payment-simulation" : "x402-payment-adapter",
+        "X-Sigillum-Payment-Mode": paymentVerification.mode,
+        "X-Sigillum-Payment-Rail": paymentVerification.rail,
+        "X-Sigillum-Quote-ID": body.quote_id ?? quote.quote_id,
       },
     },
   );
@@ -77,4 +91,3 @@ function normalizeDiff(diff?: string): string {
 
   return diff;
 }
-
