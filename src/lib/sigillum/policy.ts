@@ -6,7 +6,7 @@ export const SIGILLUM_POLICY: SigillumPolicy = {
   pass_below_score: 40,
 };
 
-export function recommendFromScoreAndFindings(
+export function recommendFromRiskScoreAndFindings(
   score: number,
   findings: Finding[],
 ): SigillumRecommendation {
@@ -21,6 +21,10 @@ export function recommendFromScoreAndFindings(
     return "block";
   }
 
+  if (score >= 70) {
+    return "block";
+  }
+
   if (
     findings.some(
       (finding) =>
@@ -28,7 +32,7 @@ export function recommendFromScoreAndFindings(
         finding.category === "minor_config_change" ||
         finding.category === "prompt_injection_surface",
     ) ||
-    score < SIGILLUM_POLICY.pass_below_score
+    score >= SIGILLUM_POLICY.pass_below_score
   ) {
     return "warn";
   }
@@ -60,24 +64,32 @@ export function evaluateAgentDecision(score: number, findings: Finding[]): Agent
   const warningFinding = findings.find((finding) =>
     ["copy_issue", "minor_config_change", "prompt_injection_surface"].includes(finding.category),
   );
-  if (warningFinding || score < SIGILLUM_POLICY.pass_below_score) {
+  if (score >= 70) {
+    return {
+      agent_decision: "stop_merge",
+      reason: `Sigillum Risk Score ${score} indicates a high-risk change.`,
+      next_action: "revise_patch_and_rerun_inspection",
+      policy_matched: "risk_score_high",
+    };
+  }
+
+  if (warningFinding || score >= SIGILLUM_POLICY.pass_below_score) {
     return {
       agent_decision: "request_patch",
       reason: warningFinding
         ? `Policy flagged ${warningFinding.category}.`
-        : `Receipt score ${score} is below the pass threshold.`,
+        : `Sigillum Risk Score ${score} requires a manual patch review.`,
       next_action: "revise_patch_and_rerun_inspection",
       policy_matched: warningFinding
         ? `warn_on.${warningFinding.category}`
-        : "score_below_threshold",
+        : "risk_score_warn_band",
     };
   }
 
   return {
     agent_decision: "continue_merge",
-    reason: "No blocking policy matched and the score clears the pass threshold.",
+    reason: "No blocking policy matched and the Sigillum Risk Score remains low.",
     next_action: "continue_merge",
     policy_matched: "pass",
   };
 }
-

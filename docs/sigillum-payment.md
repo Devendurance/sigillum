@@ -2,6 +2,8 @@
 
 Sigillum keeps one inspect flow and swaps the payment rail behind `SIGILLUM_PAYMENT_MODE`.
 
+For the local buyer harness and CLI usage, see [docs/cli.md](./cli.md).
+
 ## Demo mode
 
 `SIGILLUM_PAYMENT_MODE=demo` is the default.

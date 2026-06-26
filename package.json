@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "sigillum": "node --experimental-strip-types scripts/sigillum-cli.ts",
     "x402:buyer": "node --experimental-strip-types scripts/sigillum-x402-buyer.ts"
   },
   "dependencies": {

@@ -422,7 +422,7 @@ export function DashboardClient() {
               <div className="receipt-metrics">
                 <div>
                   <span>{receipt ? receipt.score : "--"}</span>
-                  <p>Sigillum Score</p>
+                  <p>Sigillum Risk Score</p>
                 </div>
                 <div>
                   <span>{quote ? quote.inspected_units.changed_lines : "--"}</span>

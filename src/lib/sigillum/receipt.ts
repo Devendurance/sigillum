@@ -1,14 +1,14 @@
 import { createHash } from "node:crypto";
 import { analyzeDiff } from "./analyzer";
 import { calculateQuote } from "./quote";
-import { recommendFromScoreAndFindings } from "./policy";
+import { recommendFromRiskScoreAndFindings } from "./policy";
 import type { Finding, SigillumReceipt } from "./types";
 
 export function generateSigillumReceipt(diff: string, paidAmountUsdc?: string): SigillumReceipt {
   const quote = calculateQuote(diff);
   const findings = analyzeDiff(diff);
-  const recommendation = recommendFromScoreAndFindings(scoreFromFindings(findings), findings);
-  const score = scoreFromFindings(findings);
+  const score = riskScoreFromFindings(findings);
+  const recommendation = recommendFromRiskScoreAndFindings(score, findings);
 
   return {
     receipt_id: stableId("sig", `${diff}::${quote.amount}`),
@@ -23,7 +23,7 @@ export function generateSigillumReceipt(diff: string, paidAmountUsdc?: string): 
   };
 }
 
-function scoreFromFindings(findings: Finding[]): number {
+export function riskScoreFromFindings(findings: Finding[]): number {
   const penalties = findings.reduce((total, finding) => {
     switch (finding.severity) {
       case "critical":
@@ -40,7 +40,7 @@ function scoreFromFindings(findings: Finding[]): number {
     }
   }, 0);
 
-  return Math.max(0, 100 - penalties);
+  return Math.min(100, penalties);
 }
 
 function patchRecommendationForFindings(findings: Finding[]): string {
@@ -70,4 +70,3 @@ function patchRecommendationForFindings(findings: Finding[]): string {
 function stableId(prefix: string, value: string): string {
   return `${prefix}_${createHash("sha256").update(value).digest("hex").slice(0, 12)}`;
 }
-
