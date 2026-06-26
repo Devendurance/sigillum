@@ -2,6 +2,28 @@ export type SigillumPaymentMode = "demo" | "x402";
 
 export type PaymentRail = "local-demo" | "x402";
 
+export type X402AcceptedPayment = {
+  scheme: string;
+  network: string;
+  asset: string;
+  atomic_amount: string;
+  pay_to: string;
+  max_timeout_seconds: number;
+  extra?: Record<string, unknown>;
+};
+
+export type X402PaymentDetails = {
+  x402_version: number;
+  resource: {
+    url: string;
+    description?: string;
+    mime_type?: string;
+  };
+  accepts: X402AcceptedPayment[];
+  payment_required_header?: string;
+  payment_response_header?: string;
+};
+
 export type PaymentStatus =
   | "payment_required"
   | "payment_confirmed"
@@ -11,14 +33,20 @@ export type PaymentRequirement = {
   status: "payment_required";
   status_code: 402;
   message: "HTTP 402 Payment Required";
-  network: "Arc";
+  network: string;
   rail: PaymentRail;
   currency: "USDC";
   amount: string;
   quote_id?: string;
   expires_at?: string;
   mode: SigillumPaymentMode;
+  x402?: X402PaymentDetails;
 };
+
+export type SigillumPaymentHeaders = Partial<{
+  "PAYMENT-REQUIRED": string;
+  "PAYMENT-RESPONSE": string;
+}>;
 
 export type PaymentVerificationResult =
   | {
@@ -26,6 +54,7 @@ export type PaymentVerificationResult =
       rail: PaymentRail;
       mode: SigillumPaymentMode;
       payment_reference: string;
+      response_headers?: SigillumPaymentHeaders;
     }
   | {
       ok: false;
@@ -33,5 +62,5 @@ export type PaymentVerificationResult =
       mode: SigillumPaymentMode;
       reason: string;
       requirement: PaymentRequirement;
+      response_headers?: SigillumPaymentHeaders;
     };
-

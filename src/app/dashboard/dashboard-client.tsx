@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import type { AgentDecision, Quote, SigillumReceipt } from "@/lib/sigillum/types";
 import { sampleRiskyDiff } from "@/lib/sigillum/sample-diff";
-import type { PaymentRequirement } from "@/lib/sigillum/payment/types";
+import type { PaymentRail, PaymentRequirement, SigillumPaymentMode } from "@/lib/sigillum/payment/types";
 
 type DemoPhase =
   | "idle"
@@ -109,7 +109,23 @@ export function DashboardClient() {
     }
 
     const nextQuote = (await response.json()) as Quote;
+    const paymentMetadata = getPaymentMetadata(response);
+
     setQuote(nextQuote);
+    if (paymentMetadata.mode || paymentMetadata.rail || paymentMetadata.quote_id) {
+      setPaymentInfo({
+        status: "payment_required",
+        status_code: 402,
+        message: "HTTP 402 Payment Required",
+        network: "Arc",
+        rail: paymentMetadata.rail ?? "local-demo",
+        currency: "USDC",
+        amount: nextQuote.amount,
+        quote_id: paymentMetadata.quote_id ?? nextQuote.quote_id,
+        expires_at: nextQuote.expires_at,
+        mode: paymentMetadata.mode ?? "demo",
+      });
+    }
     setPhase("quoted");
     setActiveTab("summary");
   }
@@ -148,6 +164,7 @@ export function DashboardClient() {
     });
 
     if (!response.ok) {
+      const paymentMetadata = getPaymentMetadata(response);
       const body = (await response.json().catch(() => null)) as
         | {
             message?: string;
@@ -157,19 +174,31 @@ export function DashboardClient() {
           }
         | null;
 
-      if (body?.payment) {
-        setPaymentInfo(body.payment);
-      }
+      const nextPaymentInfo = buildPaymentDisplayInfo({
+        quote,
+        headers: paymentMetadata,
+        payment: body?.payment,
+        current: paymentInfo,
+      });
+
+      setPaymentInfo(nextPaymentInfo);
+
+      const failureMode = nextPaymentInfo?.mode ?? body?.payment?.mode ?? paymentMetadata.mode;
+      const failureReason =
+        body?.reason ??
+        body?.message ??
+        "x402 mode is selected, but payment verification is not configured yet.";
 
       setErrorMessage(
-        body?.message ??
-          body?.reason ??
-          "x402 mode is selected, but payment verification is not configured yet.",
+        failureMode === "x402"
+          ? `Browser demo does not perform the real x402 payment flow. ${failureReason}`
+          : failureReason,
       );
       setPhase("payment_required");
       return;
     }
 
+    const paymentMetadata = getPaymentMetadata(response);
     const result = (await response.json()) as {
       receipt: SigillumReceipt;
       agent_decision: AgentDecision;
@@ -182,18 +211,26 @@ export function DashboardClient() {
 
     setReceipt(result.receipt);
     setAgentDecision(result.agent_decision);
-    setPaymentInfo({
-      status: "payment_required",
-      status_code: 402,
-      message: "HTTP 402 Payment Required",
-      network: "Arc",
-      rail: result.payment.rail,
-      currency: "USDC",
-      amount: quote.amount,
-      quote_id: quote.quote_id,
-      expires_at: quote.expires_at,
-      mode: result.payment.mode,
-    });
+    setPaymentInfo(
+      buildPaymentDisplayInfo({
+        quote,
+        headers: paymentMetadata,
+        payment: {
+          status: "payment_required",
+          status_code: 402,
+          message: "HTTP 402 Payment Required",
+          network: "Arc",
+          rail: result.payment.rail,
+          currency: "USDC",
+          amount: quote.amount,
+          quote_id: quote.quote_id,
+          expires_at: quote.expires_at,
+          mode: result.payment.mode,
+        },
+        paymentReference: result.payment.payment_reference,
+        current: paymentInfo,
+      }),
+    );
     setPhase("receipt_ready");
     setActiveTab("summary");
   }
@@ -213,10 +250,16 @@ export function DashboardClient() {
     phase === "payment_confirming" ||
     phase === "inspecting" ||
     phase === "receipt_ready";
-  const paymentGateLabel =
-    paymentInfo?.mode === "x402"
-      ? "x402 payment adapter"
-      : "Local demo payment simulation";
+  const isX402Mode = paymentInfo?.mode === "x402" || paymentInfo?.rail === "x402";
+  const paymentGateLabel = isX402Mode ? "x402 payment requirement" : "Local demo payment simulation";
+  const continueButtonLabel = isX402Mode ? "Review x402 requirement" : "Continue to x402 payment";
+  const payButtonLabel = isX402Mode ? "Inspect without x402 signing" : "Agent pays with wallet";
+  const sealCopy = isX402Mode
+    ? "x402 mode is visible here, but this browser demo only shows the requirement and server response."
+    : "Local demo receipt and agent decision are generated after payment confirmation.";
+  const receiptCopy = isX402Mode
+    ? "Quote, payment requirement, and inspect response stay in sync here. Real x402 settlement still has to happen outside this browser demo."
+    : "Quote, payment gate, inspection, receipt, and agent decision are all local-first here. Real x402 wiring can replace the demo gate later.";
 
   return (
     <main className="dashboard-shell">
@@ -240,7 +283,7 @@ export function DashboardClient() {
                 onClick={handleContinueToPayment}
                 disabled={!quote}
               >
-                Continue to x402 payment
+                {continueButtonLabel}
               </button>
               <button
                 className="button-secondary"
@@ -248,7 +291,7 @@ export function DashboardClient() {
                 onClick={handlePayWithWallet}
                 disabled={!quote || phase === "payment_confirming" || phase === "inspecting"}
               >
-                Agent pays with wallet
+                {payButtonLabel}
               </button>
             </div>
 
@@ -270,6 +313,11 @@ export function DashboardClient() {
                   <span>{paymentInfo?.currency ?? "USDC"}</span>
                   <span>{paymentInfo?.amount ?? quote?.amount ?? "0.000043"}</span>
                 </div>
+                {isX402Mode ? (
+                  <p className="gate-note">
+                    This browser flow previews the 402 requirement only. Real x402 payment and signing stay outside the demo UI.
+                  </p>
+                ) : null}
                 {paymentInfo?.quote_id ? <span className="quote-chip">quote {paymentInfo.quote_id}</span> : null}
               </article>
             ) : null}
@@ -327,11 +375,7 @@ export function DashboardClient() {
             <article className="result-card seal-card" data-hover-card>
               <p className="card-label">SEAL PREVIEW</p>
               <h3>Verified by Sigillum</h3>
-              <p className="seal-copy">
-                {paymentInfo?.mode === "x402"
-                  ? "x402 mode selected, but payment verification is not configured yet."
-                  : "Local demo receipt and agent decision are generated after payment confirmation."}
-              </p>
+              <p className="seal-copy">{sealCopy}</p>
               <span className="seal-badge">Verified by Sigillum</span>
             </article>
           </aside>
@@ -342,10 +386,7 @@ export function DashboardClient() {
         <div className="board-copy">
           <p className="eyebrow">RECEIPT + DECISION</p>
           <h2>Human summary and machine receipt stay in sync.</h2>
-          <p>
-            Quote, payment gate, inspection, receipt, and agent decision are all
-            local-first here. Real x402 wiring can replace the demo gate later.
-          </p>
+          <p>{receiptCopy}</p>
         </div>
 
         <div className="receipt-tabs">
@@ -427,7 +468,7 @@ export function DashboardClient() {
                 </div>
                 <div>
                   <span>Next action</span>
-                  <strong>{agentDecision ? agentDecision.next_action : "agent pays with wallet"}</strong>
+                  <strong>{agentDecision ? agentDecision.next_action : payButtonLabel.toLowerCase()}</strong>
                 </div>
                 <div>
                   <span>Policy matched</span>
@@ -557,6 +598,12 @@ export function DashboardClient() {
           flex-wrap: wrap;
           gap: 8px;
           margin-top: 14px;
+        }
+
+        .gate-note {
+          margin: 14px 0 0;
+          color: var(--ink-2);
+          font-size: 14px;
         }
 
         .quote-chip,
@@ -851,4 +898,66 @@ function pause(ms: number) {
   return new Promise<void>((resolve) => {
     window.setTimeout(resolve, ms);
   });
+}
+
+function getPaymentMetadata(response: Response): {
+  mode?: SigillumPaymentMode;
+  rail?: PaymentRail;
+  quote_id?: string;
+} {
+  const paymentMode = response.headers.get("X-Sigillum-Payment-Mode");
+  const paymentRail = response.headers.get("X-Sigillum-Payment-Rail");
+  const quoteId = response.headers.get("X-Sigillum-Quote-ID");
+  const adapterMode = response.headers.get("X-Sigillum-Mode");
+
+  const mode =
+    paymentMode === "demo" || paymentMode === "x402"
+      ? paymentMode
+      : adapterMode === "x402-payment-adapter"
+        ? "x402"
+        : adapterMode === "local-demo-payment-simulation"
+          ? "demo"
+          : undefined;
+  const rail =
+    paymentRail === "local-demo" || paymentRail === "x402"
+      ? paymentRail
+      : mode === "x402"
+        ? "x402"
+        : mode === "demo"
+          ? "local-demo"
+          : undefined;
+
+  return {
+    mode,
+    rail,
+    quote_id: quoteId ?? undefined,
+  };
+}
+
+function buildPaymentDisplayInfo({
+  quote,
+  headers,
+  payment,
+  paymentReference,
+  current,
+}: {
+  quote: Quote;
+  headers?: ReturnType<typeof getPaymentMetadata>;
+  payment?: PaymentRequirement | null;
+  paymentReference?: string;
+  current?: PaymentDisplayInfo | null;
+}): PaymentDisplayInfo {
+  return {
+    status: "payment_required",
+    status_code: 402,
+    message: "HTTP 402 Payment Required",
+    network: payment?.network ?? current?.network ?? "Arc",
+    rail: payment?.rail ?? headers?.rail ?? current?.rail ?? "local-demo",
+    currency: payment?.currency ?? current?.currency ?? "USDC",
+    amount: payment?.amount ?? current?.amount ?? quote.amount,
+    quote_id: payment?.quote_id ?? headers?.quote_id ?? current?.quote_id ?? quote.quote_id,
+    expires_at: payment?.expires_at ?? current?.expires_at ?? quote.expires_at,
+    mode: payment?.mode ?? headers?.mode ?? current?.mode ?? "demo",
+    payment_reference: paymentReference ?? current?.payment_reference,
+  };
 }

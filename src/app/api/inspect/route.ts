@@ -11,6 +11,7 @@ type InspectBody = {
   quote_id?: string;
   payment_confirmed?: boolean;
   payment_proof?: string;
+  payment_signature?: string;
 };
 
 export async function POST(request: Request) {
@@ -22,7 +23,14 @@ export async function POST(request: Request) {
     quoteId: body.quote_id ?? quote.quote_id,
     paymentConfirmed: body.payment_confirmed,
     paymentProof: body.payment_proof,
+    paymentSignature:
+      request.headers.get("PAYMENT-SIGNATURE") ??
+      request.headers.get("payment-signature") ??
+      request.headers.get("X-PAYMENT") ??
+      body.payment_signature ??
+      undefined,
     expiresAt: quote.expires_at,
+    resourceUrl: new URL(request.url).pathname,
   });
 
   if (!paymentVerification.ok) {
@@ -37,6 +45,7 @@ export async function POST(request: Request) {
       {
         status: 402,
         headers: {
+          ...(paymentVerification.response_headers ?? {}),
           "X-Sigillum-Mode": paymentVerification.mode === "demo" ? "local-demo-payment-simulation" : "x402-payment-adapter",
           "X-Sigillum-Payment-Mode": paymentVerification.mode,
           "X-Sigillum-Payment-Rail": paymentVerification.rail,
@@ -62,6 +71,7 @@ export async function POST(request: Request) {
     },
     {
       headers: {
+        ...(paymentVerification.response_headers ?? {}),
         "X-Sigillum-Mode": paymentVerification.mode === "demo" ? "local-demo-payment-simulation" : "x402-payment-adapter",
         "X-Sigillum-Payment-Mode": paymentVerification.mode,
         "X-Sigillum-Payment-Rail": paymentVerification.rail,

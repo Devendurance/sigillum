@@ -1,16 +1,49 @@
-# Sigillum Payment Adapter
+# Sigillum Payment Modes
 
-Sigillum uses a small payment adapter so the app can run in two modes without changing the inspect flow.
+Sigillum keeps one inspect flow and swaps the payment rail behind `SIGILLUM_PAYMENT_MODE`.
 
-`SIGILLUM_PAYMENT_MODE=demo` is the default. In demo mode, `/api/inspect` returns HTTP 402 until the client confirms payment, then the route generates the receipt and agent decision locally.
+## Demo mode
 
-`SIGILLUM_PAYMENT_MODE=x402` switches the adapter seam to the future Arc / x402 path. If the expected env vars are missing, `/api/inspect` returns a clear not-configured 402 response instead of pretending payment was verified.
+`SIGILLUM_PAYMENT_MODE=demo` is the default.
 
-Placeholder env vars for the future integration:
+- `POST /api/inspect` returns HTTP `402`
+- the dashboard can simulate local payment confirmation
+- receipt generation and agent decision stay local-first
 
-- `X402_SELLER_WALLET_ADDRESS`
-- `X402_NETWORK=arc`
-- `CIRCLE_GATEWAY_API_KEY`
+## x402 mode
 
-The real verification call should be added inside `src/lib/sigillum/payment/index.ts` once the repo has the required SDKs and docs to support it safely.
+`SIGILLUM_PAYMENT_MODE=x402` turns `/api/inspect` into a real seller-side x402 endpoint.
 
+- the first request returns HTTP `402 Payment Required`
+- the response includes a standard `PAYMENT-REQUIRED` header
+- a buyer signs the payment off-chain and retries with `PAYMENT-SIGNATURE`
+- Sigillum verifies and settles through the Circle Gateway facilitator before inspection runs
+- success responses include `PAYMENT-RESPONSE`, the receipt, and the agent decision
+
+## Local buyer harness
+
+Use the local harness to prove the real payment flow without moving keys into the browser:
+
+```bash
+npm run x402:buyer
+```
+
+Required buyer env vars:
+
+- `X402_BUYER_PRIVATE_KEY`
+- `X402_API_BASE_URL`
+
+Optional buyer env vars:
+
+- `X402_BUYER_ADDRESS`
+- `X402_BUYER_AUTO_DEPOSIT_USDC`
+- the local harness also accepts the older `SIGILLUM_BASE_URL`, `SIGILLUM_BUYER_PRIVATE_KEY`, `SIGILLUM_BUYER_CHAIN`, and `SIGILLUM_BUYER_RPC_URL` aliases
+
+Seller-side env placeholders:
+
+- `X402_NETWORK=arcTestnet`
+- `X402_SELLER_ADDRESS`
+- `X402_FACILITATOR_URL`
+- `X402_RPC_URL`
+
+Never expose buyer or seller private keys in frontend code.
