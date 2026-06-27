@@ -1,6 +1,6 @@
 # Sigillum CLI
 
-Sigillum now exposes a real CLI surface for quoting and inspecting diffs through the existing API and payment flow.
+Sigillum exposes a CLI surface for quoting and inspecting `code_change` actions through the existing API and x402 payment flow.
 
 ## Commands
 
@@ -66,6 +66,7 @@ npm.cmd run sigillum -- inspect .\sample.patch
 ```
 
 In demo mode, the CLI automatically follows the local demo payment confirmation path for `inspect`.
+Use this as an internal/local fallback only, not as the public live product path.
 
 ## x402 mode example
 
@@ -77,6 +78,8 @@ $env:X402_API_BASE_URL="http://localhost:3000"
 $env:X402_BUYER_PRIVATE_KEY="0xYOUR_BUYER_PRIVATE_KEY"
 npm.cmd run sigillum -- inspect .\sample.patch
 ```
+
+In live mode, the CLI sends a `code_change` action envelope, receives an `action_id` from `POST /api/quote`, and reuses that persisted action reference during the paid inspect request.
 
 ## Inspect a file
 
@@ -110,6 +113,8 @@ The JSON output includes:
 - `payment`
 - `receipt`
 - `agent_decision`
+
+The `quote` payload now also includes `action_id`.
 
 ## Quote examples
 

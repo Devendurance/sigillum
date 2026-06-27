@@ -4,14 +4,28 @@ import { calculateQuote } from "./quote";
 import { recommendFromRiskScoreAndFindings } from "./policy";
 import type { Finding, SigillumReceipt } from "./types";
 
-export function generateSigillumReceipt(diff: string, paidAmountUsdc?: string): SigillumReceipt {
+export function generateSigillumReceipt({
+  diff,
+  paidAmountUsdc,
+  actionId,
+  paymentReference,
+}: {
+  diff: string;
+  paidAmountUsdc?: string;
+  actionId?: string;
+  paymentReference?: string;
+}): SigillumReceipt {
   const quote = calculateQuote(diff);
   const findings = analyzeDiff(diff);
   const score = riskScoreFromFindings(findings);
   const recommendation = recommendFromRiskScoreAndFindings(score, findings);
+  const timestamp = new Date().toISOString();
 
   return {
-    receipt_id: stableId("sig", `${diff}::${quote.amount}`),
+    receipt_id: stableId(
+      "sig",
+      `${actionId ?? "action"}::${paymentReference ?? "payment"}::${diff}::${quote.amount}::${timestamp}`,
+    ),
     seal: "Verified by Sigillum",
     score,
     recommendation,
@@ -19,7 +33,7 @@ export function generateSigillumReceipt(diff: string, paidAmountUsdc?: string): 
     inspected_units: quote.inspected_units,
     findings,
     patch_recommendation: patchRecommendationForFindings(findings),
-    timestamp: new Date().toISOString(),
+    timestamp,
   };
 }
 

@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import type { SigillumInspectResult } from "../src/lib/sigillum/cli-client";
-import type { Quote, SigillumRecommendation } from "../src/lib/sigillum/types";
+import type { QuoteResponse, SigillumRecommendation } from "../src/lib/sigillum/types";
 
 type Command = "inspect" | "quote";
 
@@ -189,7 +189,7 @@ function maybeSaveReceipt(savePath: string | undefined, result: SigillumInspectR
   return resolvedPath;
 }
 
-function renderQuoteOutput(quote: Quote, asJson: boolean) {
+function renderQuoteOutput(quote: QuoteResponse, asJson: boolean) {
   if (asJson) {
     console.log(
       JSON.stringify(
@@ -207,6 +207,7 @@ function renderQuoteOutput(quote: Quote, asJson: boolean) {
   }
 
   console.log("SIGILLUM QUOTE");
+  console.log(`action_id=${quote.action_id}`);
   console.log(`quote_id=${quote.quote_id}`);
   console.log(`amount=${quote.amount} ${quote.currency}`);
   console.log(`expires_at=${quote.expires_at}`);
@@ -235,6 +236,7 @@ function renderInspectOutput(
   }
 
   console.log("SIGILLUM RECEIPT");
+  console.log(`action_id=${result.quote.action_id}`);
   console.log(`quote_id=${result.quote.quote_id}`);
   console.log(`amount=${result.quote.amount} ${result.quote.currency}`);
   console.log(`payment_mode=${result.payment.mode}`);

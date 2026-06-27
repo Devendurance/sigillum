@@ -19,6 +19,7 @@ async function main() {
     const client = cliClient.createSigillumClient({
       baseUrl: args.baseUrl,
       allowDemoConfirm: args.allowDemoConfirm,
+      agentName: "Sigillum Buyer Harness",
     });
     const result = await client.inspectDiff({
       diff: resolveDiff(args),

@@ -1,21 +1,106 @@
 import { NextResponse } from "next/server";
 import { calculateQuote } from "@/lib/sigillum/quote";
-import { sampleRiskyDiff } from "@/lib/sigillum/sample-diff";
+import { normalizeActionEnvelope } from "@/lib/sigillum/action-payload";
+import { getSigillumPaymentMode } from "@/lib/sigillum/payment/config";
+import { logSigillumError, logSigillumInfo } from "@/lib/server/sigillum-log";
+import type { QuoteResponse } from "@/lib/sigillum/types";
 
 type QuoteBody = {
   diff?: string;
+  idempotency_key?: string;
+  agent?: {
+    id?: string;
+    name?: string;
+    type?: string;
+  };
+  action_type?: string;
+  action_input?: {
+    diff?: string;
+    repo?: string;
+    branch?: string;
+    commit_sha?: string;
+  };
 };
 
 export async function POST(request: Request) {
   const body = await readJsonBody<QuoteBody>(request);
-  const diff = normalizeDiff(body.diff);
-  const quote = calculateQuote(diff);
-
-  return NextResponse.json(quote, {
-    headers: {
-      "X-Sigillum-Mode": "local-demo-payment-simulation",
-    },
+  const envelope = normalizeActionEnvelope(body, {
+    defaultAgentName: "Sigillum API",
   });
+
+  if (!envelope) {
+    return NextResponse.json(
+      {
+        error: "invalid_action_payload",
+        message:
+          getSigillumPaymentMode() === "x402"
+            ? "Live Sigillum quotes require a code_change action envelope with a non-empty diff."
+            : "Sigillum quote requests require a valid code_change diff payload.",
+      },
+      { status: 400 },
+    );
+  }
+
+  const quote = calculateQuote(envelope.action_input.diff);
+  try {
+    const {
+      createActionForQuote,
+      createInitialActionTimeline,
+      createQuoteForAction,
+      upsertAgentFromEnvelope,
+    } = await import("@/lib/server/sigillum-store");
+    const agent = await upsertAgentFromEnvelope(envelope);
+    const { action, quote: existingQuote } = await createActionForQuote({
+      agent,
+      envelope,
+    });
+
+    const quoteRow =
+      existingQuote ??
+      (await createQuoteForAction({
+        action,
+        quote,
+      }));
+
+    if (!existingQuote) {
+      await createInitialActionTimeline({
+        action,
+        quote: quoteRow,
+      });
+    }
+
+    logSigillumInfo("quote.created", {
+      action_id: action.publicId,
+      quote_id: quote.quote_id,
+      amount: quote.amount,
+      agent_name: envelope.agent.name,
+    });
+
+    const responseBody: QuoteResponse = {
+      ...quote,
+      action_id: action.publicId,
+      current_stage: "quote_created",
+    };
+
+    return NextResponse.json(responseBody, {
+      headers: {
+        "X-Sigillum-Payment-Mode": getSigillumPaymentMode(),
+        "X-Sigillum-Action-ID": action.publicId,
+      },
+    });
+  } catch (error) {
+    logSigillumError("quote.failed", error, {
+      payment_mode: getSigillumPaymentMode(),
+    });
+
+    return NextResponse.json(
+      {
+        error: "quote_failed",
+        message: "Sigillum could not create a persisted quote.",
+      },
+      { status: 503 },
+    );
+  }
 }
 
 async function readJsonBody<T>(request: Request): Promise<Partial<T>> {
@@ -30,12 +115,3 @@ async function readJsonBody<T>(request: Request): Promise<Partial<T>> {
     return {};
   }
 }
-
-function normalizeDiff(diff?: string): string {
-  if (typeof diff !== "string" || diff.trim().length === 0) {
-    return sampleRiskyDiff;
-  }
-
-  return diff;
-}
-

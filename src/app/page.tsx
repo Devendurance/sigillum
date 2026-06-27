@@ -96,7 +96,7 @@ export default function Home() {
           <a href="#developers">Docs</a>
         </nav>
         <Link className="nav-cta" href="/dashboard">
-          Inspect sample diff
+          Open live dashboard
         </Link>
         <button
           className="menu-button"
@@ -126,7 +126,7 @@ export default function Home() {
             Docs
           </a>
           <Link href="/dashboard" onClick={() => setMenuOpen(false)}>
-            Inspect sample diff
+            Open live dashboard
           </Link>
         </nav>
       ) : null}
@@ -141,7 +141,7 @@ export default function Home() {
           </p>
           <div className="hero-actions" data-motion="hero-copy">
             <Link className="button-primary" href="/dashboard">
-              Inspect sample diff
+              Open live dashboard
             </Link>
             <a className="text-link" href="#receipt">
               View Sigillum Receipt
@@ -248,7 +248,7 @@ export default function Home() {
         tab="PROOF LOOP"
         eyebrow="QUOTE. PAY. INSPECT. ACT."
         title="A paid proof loop for risky software actions."
-        body="The landing page shows the product contract without running the demo flow here. The full interactive quote, 402 payment gate, receipt, and decision journey belongs on the dashboard."
+        body="The landing page shows the product contract without running the live flow here. The full interactive quote, 402 payment gate, receipt, and decision journey belongs on the dashboard."
       >
         <div className="flow-track">
           {proofSteps.map((step, index) => (
@@ -433,7 +433,7 @@ export default function Home() {
         tab="DEVELOPER CHECKPOINT"
         eyebrow="AGENT-CALLABLE API"
         title="One checkpoint before risky action."
-        body="Sigillum is designed for agents to call before they act. The dashboard will host the runnable demo, but the landing page keeps the contract visible."
+        body="Sigillum is designed for agents to call before they act. The dashboard hosts the live receipt flow, while the landing page keeps the contract visible."
       >
         <div className="developer-grid">
           <pre className="code-card" data-hover-card>{`POST /quote
@@ -467,10 +467,10 @@ POST /inspect
           </p>
           <div className="hero-actions">
             <Link className="button-primary" href="/dashboard">
-              Inspect sample diff
+              Open live dashboard
             </Link>
             <a className="text-link" href="#receipt">
-              View receipt demo
+              View receipt example
             </a>
           </div>
         </article>

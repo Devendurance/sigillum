@@ -1,6 +1,7 @@
 import { GatewayClient, type SupportedChainName } from "@circle-fin/x402-batching/client";
-import type { AgentDecision, Quote, SigillumReceipt } from "./types.ts";
+import type { AgentDecision, QuoteResponse, SigillumReceipt } from "./types.ts";
 import type { PaymentRequirement } from "./payment/types.ts";
+import type { SigillumActionEnvelope } from "./lifecycle.ts";
 
 type HexString = `0x${string}`;
 
@@ -14,13 +15,14 @@ export type SigillumCliPaymentSummary = {
 };
 
 export type SigillumInspectResult = {
-  quote: Quote;
+  quote: QuoteResponse;
   payment: SigillumCliPaymentSummary;
   receipt: SigillumReceipt;
   agent_decision: AgentDecision;
 };
 
 type InspectSuccess = {
+  action_id?: string;
   receipt: SigillumReceipt;
   agent_decision: AgentDecision;
   payment?: {
@@ -40,11 +42,15 @@ type InspectFailureBody = {
 type CreateSigillumClientOptions = {
   baseUrl: string;
   allowDemoConfirm?: boolean;
+  agentName?: string;
 };
 
 type InspectDiffOptions = {
   diff: string;
   allowDemoConfirm?: boolean;
+  repo?: string;
+  branch?: string;
+  commitSha?: string;
 };
 
 export class SigillumCliError extends Error {
@@ -65,20 +71,28 @@ export function createSigillumClient(options: CreateSigillumClientOptions) {
   const baseUrl = normalizeBaseUrl(options.baseUrl);
 
   return {
-    async quote(diff: string): Promise<Quote> {
-      const response = await postJson(`${baseUrl}/api/quote`, { diff });
+    async quote(diff: string): Promise<QuoteResponse> {
+      const response = await postJson(`${baseUrl}/api/quote`, buildActionEnvelope(diff, options.agentName));
       if (!response.ok) {
         throw new SigillumCliError("quote", `Quote request failed with HTTP ${response.status}.`);
       }
 
-      return (await response.json()) as Quote;
+      return (await response.json()) as QuoteResponse;
     },
 
-    async inspectDiff({ diff, allowDemoConfirm = options.allowDemoConfirm ?? true }: InspectDiffOptions): Promise<SigillumInspectResult> {
+    async inspectDiff({
+      diff,
+      allowDemoConfirm = options.allowDemoConfirm ?? true,
+      repo,
+      branch,
+      commitSha,
+    }: InspectDiffOptions): Promise<SigillumInspectResult> {
       const quote = await this.quote(diff);
       const inspectUrl = `${baseUrl}/api/inspect`;
+      const actionEnvelope = buildActionEnvelope(diff, options.agentName, { repo, branch, commitSha });
       const firstInspectResponse = await postJson(inspectUrl, {
-        diff,
+        ...actionEnvelope,
+        action_id: quote.action_id,
         quote_id: quote.quote_id,
       });
 
@@ -121,7 +135,8 @@ export function createSigillumClient(options: CreateSigillumClientOptions) {
         }
 
         const demoResponse = await postJson(inspectUrl, {
-          diff,
+          ...actionEnvelope,
+          action_id: quote.action_id,
           quote_id: quote.quote_id,
           payment_confirmed: true,
           payment_proof: "sigillum-cli-demo-confirmation",
@@ -162,7 +177,8 @@ export function createSigillumClient(options: CreateSigillumClientOptions) {
         const paidResult = (await gateway.pay(inspectUrl, {
           method: "POST",
           body: {
-            diff,
+            ...actionEnvelope,
+            action_id: quote.action_id,
             quote_id: quote.quote_id,
           },
           headers: {
@@ -252,7 +268,7 @@ function toInspectResult({
   result,
   payment,
 }: {
-  quote: Quote;
+  quote: QuoteResponse;
   result: InspectSuccess;
   payment: SigillumCliPaymentSummary;
 }): SigillumInspectResult {
@@ -261,6 +277,30 @@ function toInspectResult({
     payment,
     receipt: result.receipt,
     agent_decision: result.agent_decision,
+  };
+}
+
+function buildActionEnvelope(
+  diff: string,
+  agentName = "Sigillum CLI",
+  metadata?: {
+    repo?: string;
+    branch?: string;
+    commitSha?: string;
+  },
+): SigillumActionEnvelope {
+  return {
+    agent: {
+      name: agentName,
+      type: "cli",
+    },
+    action_type: "code_change",
+    action_input: {
+      diff,
+      ...(metadata?.repo ? { repo: metadata.repo } : {}),
+      ...(metadata?.branch ? { branch: metadata.branch } : {}),
+      ...(metadata?.commitSha ? { commit_sha: metadata.commitSha } : {}),
+    },
   };
 }
 

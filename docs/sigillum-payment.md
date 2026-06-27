@@ -9,8 +9,8 @@ For the local buyer harness and CLI usage, see [docs/cli.md](./cli.md).
 `SIGILLUM_PAYMENT_MODE=demo` is the default.
 
 - `POST /api/inspect` returns HTTP `402`
-- the dashboard can simulate local payment confirmation
-- receipt generation and agent decision stay local-first
+- internal/local development can still confirm the payment path without live settlement
+- keep demo fallback off the public product surface
 
 ## x402 mode
 
@@ -20,7 +20,8 @@ For the local buyer harness and CLI usage, see [docs/cli.md](./cli.md).
 - the response includes a standard `PAYMENT-REQUIRED` header
 - a buyer signs the payment off-chain and retries with `PAYMENT-SIGNATURE`
 - Sigillum verifies and settles through the Circle Gateway facilitator before inspection runs
-- success responses include `PAYMENT-RESPONSE`, the receipt, and the agent decision
+- success responses include `PAYMENT-RESPONSE`, the receipt, the agent decision, and persisted action-ledger records
+- live `quote` and `inspect` requests should send the `code_change` action envelope plus the persisted `action_id` / `quote_id` references
 
 ## Local buyer harness
 
@@ -47,5 +48,9 @@ Seller-side env placeholders:
 - `X402_SELLER_ADDRESS`
 - `X402_FACILITATOR_URL`
 - `X402_RPC_URL`
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `DATABASE_URL`
 
 Never expose buyer or seller private keys in frontend code.
+Never expose the Supabase service-role key in frontend code.
