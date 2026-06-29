@@ -2,6 +2,22 @@ export type SigillumPaymentMode = "demo" | "x402";
 
 export type PaymentRail = "local-demo" | "x402";
 
+export type SigillumSettlementStatus =
+  | "gateway_received"
+  | "batched"
+  | "confirmed"
+  | "completed"
+  | "failed"
+  | "unresolved";
+
+export type SigillumSettlementScope = "individual" | "batch" | "unknown";
+
+export type SigillumSettlementSource =
+  | "gateway_api"
+  | "gateway_transfer_payload"
+  | "arc_log_resolution"
+  | "manual_backfill";
+
 export type X402AcceptedPayment = {
   scheme: string;
   network: string;
@@ -64,3 +80,15 @@ export type PaymentVerificationResult =
       requirement: PaymentRequirement;
       response_headers?: SigillumPaymentHeaders;
     };
+
+export type SigillumSettlementProof = {
+  payment_reference: string;
+  transaction_hash: string | null;
+  settlement_status: SigillumSettlementStatus;
+  settlement_scope: SigillumSettlementScope;
+  settlement_source: SigillumSettlementSource | null;
+  transaction_confirmed_at: string | null;
+  batch_reference: string | null;
+  gateway_transfer_json: Record<string, unknown> | null;
+  settlement_last_checked_at: string;
+};

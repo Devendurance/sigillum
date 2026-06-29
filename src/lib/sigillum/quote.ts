@@ -1,4 +1,10 @@
 import { createHash } from "node:crypto";
+import { canonicalizeActionEnvelope } from "./action-utils";
+import type {
+  SigillumActionEnvelope,
+  SigillumDependencyInstallInput,
+  SigillumDeployActionInput,
+} from "./lifecycle";
 import type { InspectedUnits, Quote } from "./types";
 
 const QUOTE_FLOOR_MICRO_USDC = 43;
@@ -88,7 +94,19 @@ export function estimateInspectionUnits(diff: string): InspectedUnits {
 }
 
 export function calculateQuote(diff: string): Quote {
-  const inspectedUnits = estimateInspectionUnits(diff);
+  return calculateQuoteForAction({
+    agent: {
+      name: "Sigillum Quote",
+    },
+    action_type: "code_change",
+    action_input: {
+      diff,
+    },
+  });
+}
+
+export function calculateQuoteForAction(envelope: SigillumActionEnvelope): Quote {
+  const inspectedUnits = estimateInspectionUnitsForAction(envelope);
   const microUsdc = Math.max(
     QUOTE_FLOOR_MICRO_USDC,
     inspectedUnits.changed_lines +
@@ -99,12 +117,24 @@ export function calculateQuote(diff: string): Quote {
   );
 
   return {
-    quote_id: stableId("quo", diff),
+    quote_id: stableId("quo", canonicalizeActionEnvelope(envelope)),
     currency: "USDC",
     amount: formatUsdc(microUsdc),
     inspected_units: inspectedUnits,
     expires_at: new Date(Date.now() + QUOTE_TTL_MINUTES * 60 * 1000).toISOString(),
   };
+}
+
+export function estimateInspectionUnitsForAction(envelope: SigillumActionEnvelope): InspectedUnits {
+  switch (envelope.action_type) {
+    case "dependency_install":
+      return estimateDependencyInstallUnits(envelope.action_input);
+    case "deploy_action":
+      return estimateDeployActionUnits(envelope.action_input);
+    case "code_change":
+    default:
+      return estimateInspectionUnits(envelope.action_input.diff);
+  }
 }
 
 function countMatches(input: string, expression: RegExp): number {
@@ -131,6 +161,57 @@ function isPackageJsonMetadataKey(key: string): boolean {
 
 function looksSyntaxLike(content: string): boolean {
   return /[{}()[\]=;<>]|(?:import|export|const|let|var|function|return|class)\b/.test(content);
+}
+
+function estimateDependencyInstallUnits(actionInput: SigillumDependencyInstallInput): InspectedUnits {
+  const stringFields = [
+    actionInput.package_name,
+    actionInput.version_spec,
+    actionInput.package_manager,
+    actionInput.manifest_path,
+    actionInput.install_command,
+    actionInput.reason,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  const astNodes = Math.max(
+    1,
+    Math.ceil(
+      countTokens(stringFields.join(" ")) / 5,
+    ),
+  );
+
+  return {
+    changed_lines: 1,
+    ast_nodes: astNodes,
+    dependency_changes: 1,
+    config_mutations: actionInput.manifest_path ? 1 : 0,
+    strings: stringFields.length,
+  };
+}
+
+function estimateDeployActionUnits(actionInput: SigillumDeployActionInput): InspectedUnits {
+  const stringFields = [
+    actionInput.service,
+    actionInput.target_environment,
+    actionInput.artifact_ref,
+    actionInput.commit_sha,
+    actionInput.deploy_command,
+    actionInput.change_summary,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  const astNodes = Math.max(1, Math.ceil(countTokens(stringFields.join(" ")) / 6));
+
+  return {
+    changed_lines: 0,
+    ast_nodes: astNodes,
+    dependency_changes: 0,
+    config_mutations: 1,
+    strings: stringFields.length,
+  };
+}
+
+function countTokens(input: string) {
+  return input.match(/[A-Za-z0-9._/@:-]+/g)?.length ?? 0;
 }
 
 function formatUsdc(microUsdc: number): string {

@@ -130,15 +130,15 @@ export async function verifySigillumPayment({
   });
 
   if (!paymentSignature) {
-    return {
-      ok: false,
-      rail,
-      mode,
-      reason: "A signed x402 payment is required before Sigillum can inspect this diff.",
-      requirement: x402Request.requirement,
-      response_headers: {
-        "PAYMENT-REQUIRED": x402Request.paymentRequiredHeader,
-      },
+      return {
+        ok: false,
+        rail,
+        mode,
+        reason: "A signed x402 payment is required before Sigillum can inspect this action.",
+        requirement: x402Request.requirement,
+        response_headers: {
+          "PAYMENT-REQUIRED": x402Request.paymentRequiredHeader,
+        },
     };
   }
 

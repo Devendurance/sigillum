@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
-import { analyzeDiff } from "@/lib/sigillum/analyzer";
 import { normalizeActionEnvelope } from "@/lib/sigillum/action-payload";
 import { verifySigillumPayment } from "@/lib/sigillum/payment";
 import { getSigillumPaymentMode } from "@/lib/sigillum/payment/config";
 import { evaluateAgentDecision } from "@/lib/sigillum/policy";
-import { calculateQuote } from "@/lib/sigillum/quote";
-import { generateSigillumReceipt } from "@/lib/sigillum/receipt";
+import { calculateQuoteForAction } from "@/lib/sigillum/quote";
+import { generateSigillumReceiptForAction } from "@/lib/sigillum/receipt";
 import { logSigillumError, logSigillumInfo } from "@/lib/server/sigillum-log";
 import type { PaymentVerificationResult } from "@/lib/sigillum/payment/types";
 
@@ -23,12 +22,7 @@ type InspectBody = {
     type?: string;
   };
   action_type?: string;
-  action_input?: {
-    diff?: string;
-    repo?: string;
-    branch?: string;
-    commit_sha?: string;
-  };
+  action_input?: Record<string, unknown>;
 };
 
 export async function POST(request: Request) {
@@ -57,8 +51,8 @@ export async function POST(request: Request) {
         error: "invalid_action_payload",
         message:
           paymentMode === "x402"
-            ? "Live Sigillum inspections require a code_change action envelope with a non-empty diff."
-            : "Sigillum inspect requests require a valid code_change diff payload.",
+            ? "Live Sigillum inspections require a valid action envelope with the required action input."
+            : "Sigillum inspect requests require a valid action payload.",
       },
       { status: 400 },
     );
@@ -74,7 +68,7 @@ export async function POST(request: Request) {
       findCompletedOutcome,
       findQuoteByQuoteId,
       findQuoteForAction,
-      ensurePaymentEventTransactionHash,
+      reconcilePaymentEventSettlementProof,
       recordPaymentConfirmed,
       recordPaymentRequired,
       storeReceiptAndDecision,
@@ -99,12 +93,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const quote = calculateQuote(envelope.action_input.diff);
+    const quote = calculateQuoteForAction(envelope);
     if (quoteRow && quote.quote_id !== quoteRow.quoteId) {
       return NextResponse.json(
         {
           error: "quote_payload_mismatch",
-          message: "The supplied code_change payload no longer matches the persisted quote.",
+          message: "The supplied action payload no longer matches the persisted quote.",
         },
         { status: 409 },
       );
@@ -212,6 +206,11 @@ export async function POST(request: Request) {
             rail: paymentVerification.rail,
             payment_reference: paymentVerification.payment_reference,
             transaction_hash: undefined,
+            settlement_status: null,
+            settlement_scope: null,
+            settlement_source: null,
+            transaction_confirmed_at: null,
+            batch_reference: null,
           },
         },
         {
@@ -226,20 +225,23 @@ export async function POST(request: Request) {
       verification: paymentVerification,
     });
 
-    const transactionHash = await ensurePaymentEventTransactionHash(paymentEvent.id);
+    const settlementProof = await reconcilePaymentEventSettlementProof(paymentEvent.id);
 
     logSigillumInfo("inspect.payment_confirmed", {
       action_id: persistedAction.publicId,
       quote_id: persistedQuote.quoteId,
       payment_reference: paymentVerification.payment_reference,
-      transaction_hash: transactionHash ?? undefined,
+      transaction_hash: settlementProof?.transaction_hash ?? undefined,
+      settlement_status: settlementProof?.settlement_status ?? null,
+      settlement_scope: settlementProof?.settlement_scope ?? null,
+      batch_reference: settlementProof?.batch_reference ?? null,
     });
 
     const inspection = await createInspection({
       action: persistedAction,
       quote: persistedQuote,
       inspectedUnits: quote.inspected_units,
-      diff: envelope.action_input.diff,
+      envelope,
     });
 
     logSigillumInfo("inspect.running", {
@@ -247,14 +249,13 @@ export async function POST(request: Request) {
       inspection_id: inspection.id,
     });
 
-    const findings = analyzeDiff(envelope.action_input.diff);
-    const receipt = generateSigillumReceipt({
-      diff: envelope.action_input.diff,
+    const receipt = generateSigillumReceiptForAction({
+      envelope,
       paidAmountUsdc: persistedQuote.amount,
       actionId: persistedAction.publicId,
       paymentReference: paymentVerification.payment_reference,
     });
-    const agentDecision = evaluateAgentDecision(receipt.score, findings);
+    const agentDecision = evaluateAgentDecision(receipt.score, receipt.findings);
     await storeReceiptAndDecision({
       action: persistedAction,
       inspection,
@@ -278,7 +279,12 @@ export async function POST(request: Request) {
           mode: paymentVerification.mode,
           rail: paymentVerification.rail,
           payment_reference: paymentVerification.payment_reference,
-          transaction_hash: transactionHash ?? undefined,
+          transaction_hash: settlementProof?.transaction_hash ?? undefined,
+          settlement_status: settlementProof?.settlement_status ?? null,
+          settlement_scope: settlementProof?.settlement_scope ?? null,
+          settlement_source: settlementProof?.settlement_source ?? null,
+          transaction_confirmed_at: settlementProof?.transaction_confirmed_at ?? null,
+          batch_reference: settlementProof?.batch_reference ?? null,
         },
       },
       {

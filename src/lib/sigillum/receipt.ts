@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { analyzeDiff } from "./analyzer";
-import { calculateQuote } from "./quote";
+import { analyzeDiff, analyzeSigillumAction } from "./analyzer";
+import type { SigillumActionEnvelope } from "./lifecycle";
+import { calculateQuote, calculateQuoteForAction } from "./quote";
 import { recommendFromRiskScoreAndFindings } from "./policy";
 import type { Finding, SigillumReceipt } from "./types";
 
@@ -25,6 +26,39 @@ export function generateSigillumReceipt({
     receipt_id: stableId(
       "sig",
       `${actionId ?? "action"}::${paymentReference ?? "payment"}::${diff}::${quote.amount}::${timestamp}`,
+    ),
+    seal: "Verified by Sigillum",
+    score,
+    recommendation,
+    paid_amount_usdc: paidAmountUsdc ?? quote.amount,
+    inspected_units: quote.inspected_units,
+    findings,
+    patch_recommendation: patchRecommendationForFindings(findings),
+    timestamp,
+  };
+}
+
+export function generateSigillumReceiptForAction({
+  envelope,
+  paidAmountUsdc,
+  actionId,
+  paymentReference,
+}: {
+  envelope: SigillumActionEnvelope;
+  paidAmountUsdc?: string;
+  actionId?: string;
+  paymentReference?: string;
+}): SigillumReceipt {
+  const quote = calculateQuoteForAction(envelope);
+  const findings = analyzeSigillumAction(envelope);
+  const score = riskScoreFromFindings(findings);
+  const recommendation = recommendFromRiskScoreAndFindings(score, findings);
+  const timestamp = new Date().toISOString();
+
+  return {
+    receipt_id: stableId(
+      "sig",
+      `${actionId ?? "action"}::${paymentReference ?? "payment"}::${JSON.stringify(envelope)}::${quote.amount}::${timestamp}`,
     ),
     seal: "Verified by Sigillum",
     score,

@@ -2,6 +2,8 @@
 
 Sigillum exposes a CLI surface for quoting and inspecting `code_change` actions through the existing API and x402 payment flow.
 
+The standalone runner scripts remain useful for support and debugging, but the live product loop is now intended to be server-owned through Vercel Cron and `/api/agent-loop`.
+
 ## Commands
 
 Inspect a diff file:

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { calculateQuote } from "@/lib/sigillum/quote";
+import { calculateQuoteForAction } from "@/lib/sigillum/quote";
 import { normalizeActionEnvelope } from "@/lib/sigillum/action-payload";
 import { getSigillumPaymentMode } from "@/lib/sigillum/payment/config";
 import { logSigillumError, logSigillumInfo } from "@/lib/server/sigillum-log";
@@ -14,12 +14,7 @@ type QuoteBody = {
     type?: string;
   };
   action_type?: string;
-  action_input?: {
-    diff?: string;
-    repo?: string;
-    branch?: string;
-    commit_sha?: string;
-  };
+  action_input?: Record<string, unknown>;
 };
 
 export async function POST(request: Request) {
@@ -34,14 +29,14 @@ export async function POST(request: Request) {
         error: "invalid_action_payload",
         message:
           getSigillumPaymentMode() === "x402"
-            ? "Live Sigillum quotes require a code_change action envelope with a non-empty diff."
-            : "Sigillum quote requests require a valid code_change diff payload.",
+            ? "Live Sigillum quotes require a valid action envelope with the required action input."
+            : "Sigillum quote requests require a valid action payload.",
       },
       { status: 400 },
     );
   }
 
-  const quote = calculateQuote(envelope.action_input.diff);
+  const quote = calculateQuoteForAction(envelope);
   try {
     const {
       createActionForQuote,

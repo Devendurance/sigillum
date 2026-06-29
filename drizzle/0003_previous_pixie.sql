@@ -1,0 +1,1 @@
+ALTER TABLE "actions" ADD COLUMN "action_input_summary" jsonb;

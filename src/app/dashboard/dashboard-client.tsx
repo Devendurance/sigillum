@@ -9,6 +9,11 @@ type PaymentSnapshot = {
   currency?: string;
   payment_reference?: string;
   transaction_hash?: string;
+  settlement_status?: string;
+  settlement_scope?: string;
+  settlement_source?: string;
+  transaction_confirmed_at?: string;
+  batch_reference?: string;
   rail?: string;
   mode?: string;
   network?: string;
@@ -25,6 +30,11 @@ type LiveActionRecord = {
   fileTypes: string[];
   transactionHash?: string;
   paymentReference?: string;
+  settlementStatus?: string;
+  settlementScope?: string;
+  settlementSource?: string;
+  transactionConfirmedAt?: string;
+  batchReference?: string;
   createdAt?: string;
   updatedAt?: string;
   quote?: Quote | null;
@@ -33,7 +43,24 @@ type LiveActionRecord = {
   inspectedUnits?: InspectedUnits | null;
   agentDecision?: AgentDecision | null;
   payment?: PaymentSnapshot | null;
+  lifecycleEvents: LifecycleEventRecord[];
   raw: Record<string, unknown>;
+};
+
+type LifecycleEventRecord = {
+  stage: string;
+  timestamp?: string;
+  quoteId?: string;
+  amount?: string;
+  paymentReference?: string;
+  transactionHash?: string;
+  settlementStatus?: string;
+  settlementScope?: string;
+  settlementSource?: string;
+  transactionConfirmedAt?: string;
+  batchReference?: string;
+  receiptId?: string;
+  decision?: string;
 };
 
 type LiveActionsPayload = {
@@ -110,8 +137,9 @@ export function DashboardClient({ initialResponse }: DashboardClientProps) {
   const jsonView = useMemo(() => JSON.stringify(payload.records.map((record) => record.raw), null, 2), [payload.records]);
   const hasRecords = payload.records.length > 0;
   const activeInspections = payload.records.filter((record) =>
-    record.currentStage === "payment_confirmed" || record.currentStage === "inspection_running",
+    !record.agentDecision || (record.lifecycleEvents.length > 0 && record.currentStage !== "agent_decision_created"),
   );
+  const timelineRecords = payload.records.filter((record) => record.lifecycleEvents.length > 0).slice(0, 6);
   const receiptRecords = payload.records.filter((record) => Boolean(record.receiptId));
   const decisionRecords = payload.records.filter((record) => Boolean(record.agentDecision));
   const paymentTimeline = payload.records.filter((record) => Boolean(record.payment?.payment_reference || record.payment?.transaction_hash));
@@ -191,6 +219,7 @@ export function DashboardClient({ initialResponse }: DashboardClientProps) {
                       {record.receipt?.score !== undefined ? <Metric label="Risk Score" value={String(record.receipt.score)} /> : null}
                       {record.agentDecision ? <Metric label="Decision" value={formatLabel(record.agentDecision.agent_decision)} /> : null}
                       {record.payment?.amount ? <Metric label="Payment" value={`${record.payment.amount} USDC`} /> : null}
+                      {record.settlementStatus ? <Metric label="Settlement" value={formatLabel(record.settlementStatus)} /> : null}
                     </div>
 
                     <div className="detail-grid">
@@ -221,7 +250,10 @@ export function DashboardClient({ initialResponse }: DashboardClientProps) {
                           Transaction Hash: {truncateHash(record.transactionHash)}
                         </a>
                       ) : record.paymentReference ? (
-                        <span className="proof-label">Payment Reference: {truncateHash(record.paymentReference)}</span>
+                        <span className="proof-label">
+                          Payment Reference: {truncateHash(record.paymentReference)}
+                          {record.settlementStatus ? ` • ${formatLabel(record.settlementStatus)}` : ""}
+                        </span>
                       ) : null}
                       {record.receiptId ? (
                         <a className="tx-link" href={`/receipts/${record.receiptId}`}>
@@ -268,7 +300,7 @@ export function DashboardClient({ initialResponse }: DashboardClientProps) {
               <div className="dashboard-section-grid">
                 <InfoSection
                   title="Active Inspections"
-                  subtitle="Actions currently in payment-confirmed or inspection-running states."
+                  subtitle="Recent lifecycle timelines show each proof step as it was persisted."
                   emptyState="No active inspections right now."
                   items={activeInspections.map((record) => ({
                     title: record.raw.agent_name ? `${record.raw.agent_name}` : record.id,
@@ -276,21 +308,29 @@ export function DashboardClient({ initialResponse }: DashboardClientProps) {
                     meta: record.safeSummary ?? "Inspection summary unavailable.",
                     detail: record.inspectedUnits ? summarizeInspectedUnits(record.inspectedUnits) : "Inspected units unavailable.",
                     href: record.receiptId ? `/receipts/${record.receiptId}` : undefined,
+                    timeline: record.lifecycleEvents,
                   }))}
                 />
                 <InfoSection
                   title="Payment Timeline"
-                  subtitle="Settled x402 payments show a truthful payment reference, plus an Arc link only when a real onchain hash exists."
+                  subtitle="Settled x402 payments show gateway proof first, then Arc proof only when a real settlement hash is attributable."
                   emptyState="No settled payments yet."
                   items={paymentTimeline.map((record) => ({
                     title: record.payment?.amount ? `${record.payment.amount} USDC` : "Payment",
-                    value: record.payment?.network ?? "Arc testnet",
+                    value:
+                      record.settlementScope === "batch"
+                        ? "Settled on Arc in batch"
+                        : record.payment?.network ?? "Arc testnet",
                     meta: record.paymentReference
                       ? `Payment reference ${truncateHash(record.paymentReference)}`
                       : "Payment reference unavailable.",
-                    detail: record.transactionHash
-                      ? `Onchain hash ${truncateHash(record.transactionHash)}`
-                      : "No Arc transaction hash recorded yet.",
+                    detail: describeSettlementProof({
+                      paymentReference: record.paymentReference,
+                      transactionHash: record.transactionHash,
+                      settlementStatus: record.settlementStatus,
+                      settlementScope: record.settlementScope,
+                      batchReference: record.batchReference,
+                    }),
                     href: record.transactionHash ? getArcscanTransactionUrl(record.transactionHash) : undefined,
                     external: Boolean(record.transactionHash),
                   }))}
@@ -330,11 +370,63 @@ export function DashboardClient({ initialResponse }: DashboardClientProps) {
                       ? `Payment reference ${truncateHash(record.paymentReference)}`
                       : "No settled payment reference recorded.",
                     detail: record.transactionHash
-                      ? `Transaction hash ${truncateHash(record.transactionHash)}`
-                      : "No settled transaction hash recorded.",
+                      ? record.settlementScope === "batch"
+                        ? `Batch settlement hash ${truncateHash(record.transactionHash)}`
+                        : `Transaction hash ${truncateHash(record.transactionHash)}`
+                      : record.settlementScope === "batch"
+                        ? "Batch settlement detected; Arc hash not yet attributable."
+                        : "Gateway payment confirmed; Arc settlement hash not yet attributable.",
                     href: record.receiptId ? `/api/receipts/${record.receiptId}?download=1` : undefined,
                   }))}
                 />
+              </div>
+
+              <SectionHeader label="Live Activity Timeline" meta={`${timelineRecords.length} recent action${timelineRecords.length === 1 ? "" : "s"}`} />
+              <div className="timeline-board">
+                {timelineRecords.map((record) => (
+                  <article className="timeline-card artifact-card" data-hover-card key={`timeline-${record.id}`}>
+                    <span className="card-tape" />
+                    <div className="timeline-card-header">
+                      <div>
+                        <p className="card-label">ACTIVE TIMELINE</p>
+                        <h3>{record.raw.agent_name ? String(record.raw.agent_name) : record.id}</h3>
+                      </div>
+                      <span className={`status-chip ${getStatusTone(record)}`}>{getStatusLabel(record)}</span>
+                    </div>
+                    <p className="timeline-summary">{record.safeSummary ?? "Timeline summary unavailable."}</p>
+                    <div className="timeline-list">
+                      {record.lifecycleEvents.map((event, index) => {
+                        const isCurrent = event.stage === record.currentStage;
+                        const isFinal = event.stage === "agent_decision_created";
+                        return (
+                          <div
+                            className={`timeline-step${isCurrent ? " current" : ""}${isFinal ? " final" : ""}`}
+                            key={`${record.id}-${event.stage}-${index}`}
+                          >
+                            <div className="timeline-dot" aria-hidden="true" />
+                            <div className="timeline-copy">
+                              <div className="timeline-copy-row">
+                                <strong>{formatLabel(event.stage)}</strong>
+                                <span>{event.timestamp ? formatTimestamp(event.timestamp) : "Timestamp unavailable"}</span>
+                              </div>
+                              <p>{describeLifecycleEvent(event)}</p>
+                              {event.transactionHash ? (
+                                <a
+                                  className="timeline-link"
+                                  href={getArcscanTransactionUrl(event.transactionHash)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  Arcscan {truncateHash(event.transactionHash)}
+                                </a>
+                              ) : null}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </article>
+                ))}
               </div>
             </div>
           ) : (
@@ -481,6 +573,12 @@ export function DashboardClient({ initialResponse }: DashboardClientProps) {
         .board-sections,
         .dashboard-section-grid {
           display: grid;
+          gap: 20px;
+        }
+
+        .timeline-board {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
           gap: 20px;
         }
 
@@ -739,6 +837,134 @@ export function DashboardClient({ initialResponse }: DashboardClientProps) {
           gap: 12px;
         }
 
+        .timeline-card {
+          display: grid;
+          gap: 16px;
+          padding: 22px;
+        }
+
+        .timeline-card-header,
+        .timeline-copy-row {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+        }
+
+        .timeline-card-header h3 {
+          margin: 6px 0 0;
+          font-size: clamp(22px, 2.6vw, 30px);
+          line-height: 1.05;
+        }
+
+        .timeline-summary {
+          margin: 0;
+          color: var(--ink-2);
+          line-height: 1.55;
+        }
+
+        .timeline-list {
+          display: grid;
+          gap: 14px;
+        }
+
+        .timeline-step {
+          display: grid;
+          grid-template-columns: 16px minmax(0, 1fr);
+          gap: 12px;
+          align-items: flex-start;
+        }
+
+        .timeline-dot {
+          position: relative;
+          width: 12px;
+          height: 12px;
+          margin-top: 6px;
+          border-radius: 999px;
+          background: var(--board);
+          border: 1px solid var(--border-strong);
+        }
+
+        .timeline-step:not(:last-child) .timeline-dot::after {
+          content: "";
+          position: absolute;
+          top: 14px;
+          left: 50%;
+          width: 1px;
+          height: calc(100% + 14px);
+          background: repeating-linear-gradient(
+            to bottom,
+            rgba(17, 19, 24, 0.22) 0 3px,
+            transparent 3px 7px
+          );
+          transform: translateX(-50%);
+        }
+
+        .timeline-step.current .timeline-dot {
+          background: var(--butter);
+          border-color: rgba(138, 107, 0, 0.35);
+        }
+
+        .timeline-step.final .timeline-dot {
+          background: var(--mint);
+          border-color: rgba(18, 138, 74, 0.35);
+        }
+
+        .timeline-copy {
+          display: grid;
+          gap: 6px;
+          padding-bottom: 8px;
+        }
+
+        .timeline-copy-row strong {
+          font-size: 14px;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        }
+
+        .timeline-copy-row span,
+        .timeline-copy p {
+          color: var(--ink-2);
+          font-size: 13px;
+          line-height: 1.55;
+        }
+
+        .timeline-copy p {
+          margin: 0;
+        }
+
+        .timeline-link {
+          width: fit-content;
+          color: var(--ink);
+          font-size: 13px;
+          font-weight: 700;
+          text-decoration: underline;
+          text-decoration-style: dotted;
+          text-underline-offset: 4px;
+        }
+
+        .mini-timeline {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
+        .mini-timeline-step {
+          display: inline-flex;
+          min-height: 24px;
+          align-items: center;
+          border-radius: 999px;
+          padding: 0 8px;
+          background: var(--paper);
+          border: 1px solid var(--border);
+          color: var(--ink-2);
+          font-size: 10px;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+        }
+
         .dashboard-json {
           min-height: 420px;
           margin: 0;
@@ -834,6 +1060,7 @@ function InfoSection({
     detail?: string;
     href?: string;
     external?: boolean;
+    timeline?: LifecycleEventRecord[];
   }>;
 }) {
   return (
@@ -855,6 +1082,15 @@ function InfoSection({
               </div>
               <p>{item.meta}</p>
               {item.detail ? <p className="dashboard-section-detail">{item.detail}</p> : null}
+              {item.timeline && item.timeline.length > 0 ? (
+                <div className="mini-timeline">
+                  {item.timeline.map((event, eventIndex) => (
+                    <span className="mini-timeline-step" key={`${item.title}-${event.stage}-${eventIndex}`}>
+                      {formatLabel(event.stage)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               {item.href ? (
                 <a
                   className="dashboard-section-link"
@@ -1035,6 +1271,11 @@ function normalizeRecord(entry: unknown, index: number): LiveActionRecord | null
     fileTypes: normalizeStringList(raw.file_types),
     transactionHash: readString(raw.transaction_hash) ?? undefined,
     paymentReference: readString(raw.payment_reference) ?? undefined,
+    settlementStatus: readString(raw.settlement_status) ?? undefined,
+    settlementScope: readString(raw.settlement_scope) ?? undefined,
+    settlementSource: readString(raw.settlement_source) ?? undefined,
+    transactionConfirmedAt: readString(raw.transaction_confirmed_at) ?? undefined,
+    batchReference: readString(raw.batch_reference) ?? undefined,
     createdAt: readString(raw.created_at) ?? readString(raw.createdAt) ?? receipt?.timestamp,
     updatedAt: readString(raw.updated_at) ?? readString(raw.updatedAt) ?? undefined,
     quote,
@@ -1043,6 +1284,7 @@ function normalizeRecord(entry: unknown, index: number): LiveActionRecord | null
     inspectedUnits: normalizeInspectedUnits(raw.inspected_units) ?? receipt?.inspected_units ?? quote?.inspected_units ?? null,
     agentDecision,
     payment,
+    lifecycleEvents: normalizeLifecycleEvents(raw.lifecycle_events),
     raw,
   };
 }
@@ -1149,10 +1391,120 @@ function normalizePayment(value: unknown): PaymentSnapshot | null {
     currency: readString(raw.currency) ?? undefined,
     transaction_hash: normalizeTransactionHash(readString(raw.transaction_hash)),
     payment_reference: readString(raw.payment_reference) ?? undefined,
+    settlement_status: readString(raw.settlement_status) ?? undefined,
+    settlement_scope: readString(raw.settlement_scope) ?? undefined,
+    settlement_source: readString(raw.settlement_source) ?? undefined,
+    transaction_confirmed_at: readString(raw.transaction_confirmed_at) ?? undefined,
+    batch_reference: readString(raw.batch_reference) ?? undefined,
     rail: readString(raw.rail) ?? undefined,
     mode: readString(raw.mode) ?? undefined,
     network: readString(raw.network) ?? undefined,
   };
+}
+
+function normalizeLifecycleEvents(value: unknown): LifecycleEventRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return [];
+    }
+
+    const raw = entry as Record<string, unknown>;
+    const stage = readString(raw.stage);
+    if (!stage) {
+      return [];
+    }
+
+    return [
+      {
+        stage,
+        timestamp: readString(raw.timestamp) ?? undefined,
+        quoteId: readString(raw.quote_id) ?? undefined,
+        amount: readString(raw.amount) ?? undefined,
+        paymentReference: readString(raw.payment_reference) ?? undefined,
+        transactionHash: normalizeTransactionHash(readString(raw.transaction_hash)),
+        settlementStatus: readString(raw.settlement_status) ?? undefined,
+        settlementScope: readString(raw.settlement_scope) ?? undefined,
+        settlementSource: readString(raw.settlement_source) ?? undefined,
+        transactionConfirmedAt: readString(raw.transaction_confirmed_at) ?? undefined,
+        batchReference: readString(raw.batch_reference) ?? undefined,
+        receiptId: readString(raw.receipt_id) ?? undefined,
+        decision: readString(raw.decision) ?? undefined,
+      },
+    ];
+  });
+}
+
+function describeLifecycleEvent(event: LifecycleEventRecord) {
+  switch (event.stage) {
+    case "action_submitted":
+      return "Action was submitted into the persisted ledger.";
+    case "quote_created":
+      return `Quote ${event.quoteId ?? "pending"} created${event.amount ? ` for ${event.amount} USDC` : ""}.`;
+    case "payment_required":
+      return `HTTP 402 payment required${event.amount ? ` for ${event.amount} USDC` : ""}.`;
+    case "payment_confirmed":
+      return describeSettlementProof({
+        paymentReference: event.paymentReference,
+        transactionHash: event.transactionHash,
+        settlementStatus: event.settlementStatus,
+        settlementScope: event.settlementScope,
+        batchReference: event.batchReference,
+      });
+    case "inspection_running":
+      return "Sigillum inspection is running on the action payload.";
+    case "receipt_generated":
+      return event.receiptId ? `Receipt ${event.receiptId} was generated.` : "Receipt was generated.";
+    case "agent_decision_created":
+      return event.decision
+        ? `Agent decision ${formatLabel(event.decision)} was recorded.`
+        : "Agent decision was recorded.";
+    default:
+      return "Lifecycle event recorded.";
+  }
+}
+
+function describeSettlementProof({
+  paymentReference,
+  transactionHash,
+  settlementStatus,
+  settlementScope,
+  batchReference,
+}: {
+  paymentReference?: string;
+  transactionHash?: string;
+  settlementStatus?: string;
+  settlementScope?: string;
+  batchReference?: string;
+}) {
+  if (transactionHash && settlementScope === "batch") {
+    return batchReference
+      ? `Gateway payment ${truncateHash(paymentReference ?? batchReference)} was settled on Arc in batch ${truncateHash(batchReference)}.`
+      : `Gateway payment ${truncateHash(paymentReference ?? transactionHash)} was settled on Arc in a batch transaction.`;
+  }
+
+  if (transactionHash) {
+    return paymentReference
+      ? `Gateway payment ${truncateHash(paymentReference)} settled on Arc with hash ${truncateHash(transactionHash)}.`
+      : `x402 payment settled on Arc with hash ${truncateHash(transactionHash)}.`;
+  }
+
+  if (settlementScope === "batch" && batchReference) {
+    return `Gateway payment ${truncateHash(paymentReference ?? batchReference)} belongs to settlement batch ${truncateHash(batchReference)}; Arc hash not yet attributable.`;
+  }
+
+  if (settlementStatus === "gateway_received" || settlementStatus === "confirmed" || settlementStatus === "unresolved") {
+    return "Gateway payment confirmed; Arc settlement hash not yet attributable.";
+  }
+
+  if (paymentReference) {
+    return `x402 payment confirmed with reference ${truncateHash(paymentReference)}.`;
+  }
+
+  return "x402 payment confirmed.";
 }
 
 function normalizeTransactionHash(value: string | null) {

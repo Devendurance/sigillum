@@ -1,16 +1,17 @@
-import type { SigillumActionStage } from "./lifecycle";
+import type { SigillumActionStage, SigillumActionType } from "./lifecycle";
 
 import type {
   PaymentRail,
   PaymentRequirement,
+  SigillumSettlementScope,
+  SigillumSettlementSource,
+  SigillumSettlementStatus,
   SigillumPaymentMode,
 } from "./payment/types";
 
 export type SigillumSeverity = "info" | "low" | "medium" | "high" | "critical";
 
 export type SigillumRecommendation = "pass" | "warn" | "block";
-
-export type SigillumActionType = "code_change";
 
 export type SigillumActionStatus =
   | "quoted"
@@ -75,7 +76,7 @@ export type SigillumPublicReceipt = {
   receipt_id: string;
   action_id: string;
   agent_name: string;
-  action_type: "code_change";
+  action_type: SigillumActionType;
   risk_score: number;
   recommendation: SigillumRecommendation;
   paid_amount_usdc: string;
@@ -83,6 +84,11 @@ export type SigillumPublicReceipt = {
   network: string | null;
   transaction_hash: string | null;
   payment_reference: string | null;
+  settlement_status: SigillumSettlementStatus | null;
+  settlement_scope: SigillumSettlementScope | null;
+  settlement_source: SigillumSettlementSource | null;
+  transaction_confirmed_at: string | null;
+  batch_reference: string | null;
   receipt_hash: string;
   inspected_units: InspectedUnits;
   findings: Finding[];
@@ -103,6 +109,11 @@ export type SigillumPaymentSummary = {
   rail: PaymentRail;
   payment_reference?: string;
   transaction_hash?: string;
+  settlement_status?: SigillumSettlementStatus | null;
+  settlement_scope?: SigillumSettlementScope | null;
+  settlement_source?: SigillumSettlementSource | null;
+  transaction_confirmed_at?: string | null;
+  batch_reference?: string | null;
 };
 
 export type SigillumQuoteLifecyclePayload = {
@@ -134,7 +145,7 @@ export type SigillumLifecyclePayload =
 export type SigillumLifecycleEventEnvelope = {
   event_id: string;
   action_id: string;
-  action_type: "code_change";
+  action_type: SigillumActionType;
   event_type: SigillumLifecycleEventType;
   quote_id: string;
   receipt_id?: string;
@@ -144,7 +155,7 @@ export type SigillumLifecycleEventEnvelope = {
 
 export type SigillumActionEnvelope = {
   action_id: string;
-  action_type: "code_change";
+  action_type: SigillumActionType;
   status: SigillumActionStatus;
   diff_sha256: string;
   quote: Quote;
@@ -161,13 +172,18 @@ export type SigillumLiveActionRow = {
   action_id: string;
   agent_id: string | null;
   agent_name: string;
-  action_type: "code_change";
+  action_type: SigillumActionType;
   current_stage: SigillumActionStage;
   amount: string | null;
   rail: PaymentRail | null;
   network: string | null;
   transaction_hash: string | null;
   payment_reference: string | null;
+  settlement_status: SigillumSettlementStatus | null;
+  settlement_scope: SigillumSettlementScope | null;
+  settlement_source: SigillumSettlementSource | null;
+  transaction_confirmed_at: string | null;
+  batch_reference: string | null;
   risk_score: number | null;
   recommendation: SigillumRecommendation | null;
   receipt_id: string | null;
@@ -178,4 +194,21 @@ export type SigillumLiveActionRow = {
   file_types: string[];
   safe_summary: string;
   timestamp: string;
+  lifecycle_events: SigillumLiveActionLifecycleEvent[];
+};
+
+export type SigillumLiveActionLifecycleEvent = {
+  stage: SigillumActionStage;
+  timestamp: string;
+  quote_id?: string;
+  amount?: string;
+  payment_reference?: string;
+  transaction_hash?: string;
+  settlement_status?: SigillumSettlementStatus;
+  settlement_scope?: SigillumSettlementScope;
+  settlement_source?: SigillumSettlementSource;
+  transaction_confirmed_at?: string;
+  batch_reference?: string;
+  receipt_id?: string;
+  decision?: AgentDecision["agent_decision"];
 };

@@ -32,7 +32,7 @@ async function main() {
         `amount=${result.payment.amount} USDC`,
         `mode=${result.payment.mode}`,
         `rail=${result.payment.rail}`,
-        result.payment.transaction ? `tx=${result.payment.transaction}` : null,
+        result.payment.transaction_hash ? `tx=${result.payment.transaction_hash}` : null,
         result.payment.payment_reference ? `ref=${result.payment.payment_reference}` : null,
       ]
         .filter(Boolean)

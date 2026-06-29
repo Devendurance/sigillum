@@ -3,6 +3,7 @@
 Sigillum keeps one inspect flow and swaps the payment rail behind `SIGILLUM_PAYMENT_MODE`.
 
 For the local buyer harness and CLI usage, see [docs/cli.md](./cli.md).
+For server-owned automation, see [docs/sigillum-automation.md](./sigillum-automation.md).
 
 ## Demo mode
 
@@ -54,3 +55,17 @@ Seller-side env placeholders:
 
 Never expose buyer or seller private keys in frontend code.
 Never expose the Supabase service-role key in frontend code.
+
+## Payment provenance
+
+Sigillum keeps payment proof and explorer provenance separate:
+
+- `payment_reference` is the required proof that the x402 payment settled through the gateway path
+- `transaction_hash` is optional and should only be populated when Sigillum has a real Arc `0x...` hash
+
+Public surfaces should always show the `payment_reference`.
+Arcscan links should render only when `transaction_hash` is a real onchain hash.
+
+If no onchain hash is exposed yet, show:
+
+`Gateway payment reference confirmed; explorer transaction hash not exposed.`

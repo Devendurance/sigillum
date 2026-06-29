@@ -10,6 +10,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { SigillumActionInputSummary } from "@/lib/sigillum/lifecycle";
 import type { InspectedUnits, SigillumReceipt } from "@/lib/sigillum/types";
 
 const timestamps = {
@@ -44,6 +45,7 @@ export const actions = pgTable(
     actionType: text("action_type").notNull(),
     currentStage: text("current_stage").notNull(),
     idempotencyKey: text("idempotency_key"),
+    actionInputSummary: jsonb("action_input_summary").$type<SigillumActionInputSummary | null>(),
     repo: text("repo"),
     branch: text("branch"),
     commitSha: text("commit_sha"),
@@ -92,6 +94,13 @@ export const paymentEvents = pgTable(
     amount: text("amount").notNull(),
     paymentReference: text("payment_reference"),
     transactionHash: text("transaction_hash"),
+    settlementStatus: text("settlement_status"),
+    settlementScope: text("settlement_scope"),
+    settlementSource: text("settlement_source"),
+    transactionConfirmedAt: timestamp("transaction_confirmed_at", { withTimezone: true }),
+    gatewayTransferJson: jsonb("gateway_transfer_json").$type<Record<string, unknown> | null>(),
+    batchReference: text("batch_reference"),
+    settlementLastCheckedAt: timestamp("settlement_last_checked_at", { withTimezone: true }),
     verificationOutcome: text("verification_outcome"),
     requirement: jsonb("requirement").$type<Record<string, unknown> | null>(),
     metadata: jsonb("metadata").$type<Record<string, unknown> | null>(),
@@ -102,6 +111,8 @@ export const paymentEvents = pgTable(
     quoteIdx: index("payment_events_quote_row_id_idx").on(table.quoteRowId),
     paymentRefIdx: index("payment_events_payment_reference_idx").on(table.paymentReference),
     transactionHashIdx: index("payment_events_transaction_hash_idx").on(table.transactionHash),
+    settlementStatusIdx: index("payment_events_settlement_status_idx").on(table.settlementStatus),
+    batchReferenceIdx: index("payment_events_batch_reference_idx").on(table.batchReference),
   }),
 );
 

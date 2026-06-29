@@ -1,6 +1,12 @@
 import { createPublicClient, http, parseAbiItem } from "viem";
 import { defineChain } from "viem";
 import { CHAIN_CONFIGS } from "@circle-fin/x402-batching/client";
+import type {
+  SigillumSettlementProof,
+  SigillumSettlementScope,
+  SigillumSettlementSource,
+  SigillumSettlementStatus,
+} from "@/lib/sigillum/payment/types";
 import {
   getCircleGatewayAuthHeaders,
   getSigillumX402FacilitatorUrl,
@@ -22,30 +28,126 @@ type GatewayTransferRecord = {
   amount?: string;
   createdAt?: string;
   updatedAt?: string;
+  transactionHash?: unknown;
+  txHash?: unknown;
+  hash?: unknown;
+  destinationTxHash?: unknown;
+  sourceTxHash?: unknown;
+  transferTxHash?: unknown;
+  settlementTxHash?: unknown;
+  batchReference?: unknown;
+  batchId?: unknown;
+  settlementBatchId?: unknown;
   [key: string]: unknown;
 };
 
-export async function resolveSigillumTransactionHash(paymentReference: string): Promise<string | null> {
+type ResolveSettlementProofOptions = {
+  paymentReference: string;
+  source?: SigillumSettlementSource;
+};
+
+export async function resolveSigillumSettlementProof({
+  paymentReference,
+  source = "gateway_api",
+}: ResolveSettlementProofOptions): Promise<SigillumSettlementProof> {
+  const checkedAt = new Date().toISOString();
+
   if (isExplorerTransactionHash(paymentReference)) {
-    return paymentReference;
+    return {
+      payment_reference: paymentReference,
+      transaction_hash: paymentReference,
+      settlement_status: "completed",
+      settlement_scope: "individual",
+      settlement_source: source,
+      transaction_confirmed_at: null,
+      batch_reference: null,
+      gateway_transfer_json: null,
+      settlement_last_checked_at: checkedAt,
+    };
   }
+
+  logSigillumInfo("payment_provenance.lookup_started", {
+    payment_reference: paymentReference,
+  });
 
   const transfer = await fetchGatewayTransfer(paymentReference);
   if (!transfer) {
-    return null;
+    logSigillumInfo("payment_provenance.transfer_not_found", {
+      payment_reference: paymentReference,
+    });
+
+    return {
+      payment_reference: paymentReference,
+      transaction_hash: null,
+      settlement_status: "unresolved",
+      settlement_scope: "unknown",
+      settlement_source: null,
+      transaction_confirmed_at: null,
+      batch_reference: null,
+      gateway_transfer_json: null,
+      settlement_last_checked_at: checkedAt,
+    };
   }
 
-  const payloadHash = readCandidateHash(transfer);
-  if (payloadHash) {
-    return payloadHash;
+  logSigillumInfo("payment_provenance.transfer_found", {
+    payment_reference: paymentReference,
+    transfer_status: typeof transfer.status === "string" ? transfer.status : null,
+  });
+
+  const normalized = normalizeGatewayTransfer(transfer, checkedAt);
+  if (normalized.transaction_hash) {
+    logSigillumInfo("payment_provenance.authoritative_hash_found", {
+      payment_reference: paymentReference,
+      transaction_hash: normalized.transaction_hash,
+      settlement_scope: normalized.settlement_scope,
+    });
+    return normalized;
+  }
+
+  if (!shouldAttemptArcLogResolution(transfer, normalized.settlement_status)) {
+    if (normalized.batch_reference) {
+      logSigillumInfo("payment_provenance.batch_detected_without_hash", {
+        payment_reference: paymentReference,
+        batch_reference: normalized.batch_reference,
+      });
+    } else {
+      logSigillumInfo("payment_provenance.unresolved_without_chain_attempt", {
+        payment_reference: paymentReference,
+        settlement_status: normalized.settlement_status,
+      });
+    }
+
+    return normalized;
   }
 
   const chainHash = await resolveTransferHashFromArcLogs(transfer);
-  if (chainHash) {
-    return chainHash;
+  if (!chainHash) {
+    logSigillumInfo("payment_provenance.proof_unresolved", {
+      payment_reference: paymentReference,
+      settlement_status: normalized.settlement_status,
+      settlement_scope: normalized.settlement_scope,
+    });
+    return normalized;
   }
 
-  return null;
+  logSigillumInfo("payment_provenance.arc_hash_resolved", {
+    payment_reference: paymentReference,
+    transaction_hash: chainHash,
+    batch_reference: normalized.batch_reference,
+  });
+
+  return {
+    ...normalized,
+    transaction_hash: chainHash,
+    settlement_source: "arc_log_resolution",
+    settlement_status:
+      normalized.settlement_scope === "batch" ? "batched" : "completed",
+  };
+}
+
+export async function resolveSigillumTransactionHash(paymentReference: string): Promise<string | null> {
+  const proof = await resolveSigillumSettlementProof({ paymentReference });
+  return proof.transaction_hash;
 }
 
 export function isExplorerTransactionHash(value: string | null | undefined): value is `0x${string}` {
@@ -82,6 +184,112 @@ async function fetchGatewayTransfer(paymentReference: string): Promise<GatewayTr
   }
 }
 
+function normalizeGatewayTransfer(
+  transfer: GatewayTransferRecord,
+  checkedAt: string,
+): SigillumSettlementProof {
+  const rawStatus = typeof transfer.status === "string" ? transfer.status : "";
+  const normalizedStatus = rawStatus.trim().toLowerCase();
+  const batchReference = readBatchReference(transfer);
+  const authoritativeHash = readCandidateHash(transfer);
+  const transactionConfirmedAt =
+    readTimestampIso(transfer.updatedAt) ??
+    readTimestampIso(transfer.createdAt) ??
+    null;
+
+  return {
+    payment_reference: transfer.id,
+    transaction_hash: authoritativeHash,
+    settlement_status: deriveSettlementStatus(normalizedStatus, authoritativeHash, batchReference),
+    settlement_scope: deriveSettlementScope(batchReference, authoritativeHash),
+    settlement_source: authoritativeHash ? "gateway_transfer_payload" : "gateway_api",
+    transaction_confirmed_at: authoritativeHash ? transactionConfirmedAt : null,
+    batch_reference: batchReference,
+    gateway_transfer_json: transfer,
+    settlement_last_checked_at: checkedAt,
+  };
+}
+
+function deriveSettlementStatus(
+  normalizedStatus: string,
+  authoritativeHash: string | null,
+  batchReference: string | null,
+): SigillumSettlementStatus {
+  if (
+    normalizedStatus.includes("fail") ||
+    normalizedStatus.includes("error") ||
+    normalizedStatus.includes("reject")
+  ) {
+    return "failed";
+  }
+
+  if (authoritativeHash) {
+    return batchReference ? "batched" : "completed";
+  }
+
+  if (normalizedStatus.includes("batch")) {
+    return "batched";
+  }
+
+  if (
+    normalizedStatus.includes("complete") ||
+    normalizedStatus.includes("settled") ||
+    normalizedStatus.includes("success") ||
+    normalizedStatus.includes("succeeded")
+  ) {
+    return batchReference ? "batched" : "completed";
+  }
+
+  if (normalizedStatus.includes("confirm")) {
+    return "confirmed";
+  }
+
+  if (normalizedStatus.length > 0 || batchReference) {
+    return "gateway_received";
+  }
+
+  return "unresolved";
+}
+
+function deriveSettlementScope(
+  batchReference: string | null,
+  authoritativeHash: string | null,
+): SigillumSettlementScope {
+  if (batchReference) {
+    return "batch";
+  }
+
+  if (authoritativeHash) {
+    return "individual";
+  }
+
+  return "unknown";
+}
+
+function shouldAttemptArcLogResolution(
+  transfer: GatewayTransferRecord,
+  status: SigillumSettlementStatus,
+) {
+  return (
+    transfer.token === "USDC" &&
+    (status === "batched" || status === "confirmed" || status === "completed")
+  );
+}
+
+function readBatchReference(record: GatewayTransferRecord) {
+  for (const candidate of [
+    record.batchReference,
+    record.batchId,
+    record.settlementBatchId,
+  ]) {
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+
+  return null;
+}
+
 function readCandidateHash(record: GatewayTransferRecord): string | null {
   const candidates = [
     record.transactionHash,
@@ -103,10 +311,6 @@ function readCandidateHash(record: GatewayTransferRecord): string | null {
 }
 
 async function resolveTransferHashFromArcLogs(transfer: GatewayTransferRecord): Promise<string | null> {
-  if (transfer.token !== "USDC") {
-    return null;
-  }
-
   const chainConfig = CHAIN_CONFIGS[getSigillumX402Network()];
   const rpcUrl = process.env.X402_RPC_URL?.trim() || chainConfig.rpcUrl;
   if (!rpcUrl) {
@@ -165,6 +369,13 @@ async function resolveTransferHashFromArcLogs(transfer: GatewayTransferRecord): 
       const hashes = [...new Set(logs.map((log) => log.transactionHash).filter(isExplorerTransactionHash))];
       if (hashes.length === 1) {
         return hashes[0];
+      }
+
+      if (hashes.length > 1) {
+        logSigillumInfo("payment_provenance.arc_log_ambiguous", {
+          payment_reference: transfer.id,
+          candidate_hash_count: hashes.length,
+        });
       }
     }
 
@@ -230,4 +441,13 @@ function readTimestamp(value: unknown) {
 
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) ? Math.floor(timestamp / 1000) : null;
+}
+
+function readTimestampIso(value: unknown) {
+  if (typeof value !== "string") {
+    return null;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
 }

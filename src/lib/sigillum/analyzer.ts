@@ -1,3 +1,4 @@
+import type { SigillumActionEnvelope } from "./lifecycle";
 import type { Finding, SigillumSeverity } from "./types";
 import { estimateInspectionUnits } from "./quote";
 
@@ -114,6 +115,18 @@ export function analyzeDiff(diff: string): Finding[] {
   }
 
   return sortFindings(findings);
+}
+
+export function analyzeSigillumAction(envelope: SigillumActionEnvelope): Finding[] {
+  switch (envelope.action_type) {
+    case "dependency_install":
+      return analyzeDependencyInstall(envelope.action_input);
+    case "deploy_action":
+      return analyzeDeployAction(envelope.action_input);
+    case "code_change":
+    default:
+      return analyzeDiff(envelope.action_input.diff);
+  }
 }
 
 function maybeAddSecretFinding(
@@ -300,6 +313,152 @@ function maybeAddCopyFinding(
     file,
     line: lineNumber,
   });
+}
+
+function analyzeDependencyInstall(actionInput: Extract<SigillumActionEnvelope, { action_type: "dependency_install" }>["action_input"]) {
+  const findings: Finding[] = [];
+  const packageName = actionInput.package_name;
+  const versionSpec = actionInput.version_spec ?? "";
+  const installCommand = actionInput.install_command ?? "";
+  const manifestPath = actionInput.manifest_path ?? "";
+  const packageManager = actionInput.package_manager ?? "";
+  const reason = actionInput.reason ?? "";
+
+  maybeAddInlineSecretFinding(findings, installCommand, "dependency_install", 1);
+  maybeAddInlineSecretFinding(findings, reason, "dependency_install", 1);
+
+  if (/postinstall|shell|proxy|eval|hook|loader|patch/i.test(packageName)) {
+    findings.push({
+      severity: "high",
+      category: "unsafe_dependency",
+      message: `Dependency "${packageName}" matches a high-risk supply-chain pattern.`,
+    });
+  }
+
+  if (/git\+|https?:\/\/|file:|workspace:/i.test(versionSpec)) {
+    findings.push({
+      severity: "high",
+      category: "unsafe_dependency",
+      message: `Dependency "${packageName}" uses a non-registry source in "${versionSpec}".`,
+    });
+  } else if (!versionSpec || /^(latest|\*|x)$/i.test(versionSpec)) {
+    findings.push({
+      severity: "medium",
+      category: "dependency_risk",
+      message: `Dependency "${packageName}" is not pinned to a stable version.`,
+    });
+  } else {
+    findings.push({
+      severity: "info",
+      category: "dependency_risk",
+      message: `Dependency "${packageName}" changes the install surface and should be reviewed.`,
+    });
+  }
+
+  if (/curl|wget|bash\s+-c|sh\s+-c|powershell|node\s+-e|npx/i.test(installCommand)) {
+    findings.push({
+      severity: "high",
+      category: "dangerous_api",
+      message: "Install command includes remote fetch or shell execution primitives.",
+    });
+  }
+
+  if (manifestPath) {
+    findings.push({
+      severity: "info",
+      category: "minor_config_change",
+      message: `Manifest path "${manifestPath}" changes the package install surface.`,
+      file: manifestPath,
+    });
+  }
+
+  if (packageManager && !/^(npm|pnpm|yarn|bun)$/i.test(packageManager)) {
+    findings.push({
+      severity: "medium",
+      category: "minor_config_change",
+      message: `Package manager "${packageManager}" is uncommon and should be reviewed.`,
+    });
+  }
+
+  return sortFindings(findings);
+}
+
+function analyzeDeployAction(actionInput: Extract<SigillumActionEnvelope, { action_type: "deploy_action" }>["action_input"]) {
+  const findings: Finding[] = [];
+  const target = actionInput.target_environment;
+  const command = actionInput.deploy_command ?? "";
+  const changeSummary = actionInput.change_summary ?? "";
+
+  maybeAddInlineSecretFinding(findings, command, actionInput.service, 1);
+  maybeAddInlineSecretFinding(findings, changeSummary, actionInput.service, 1);
+
+  if (/\bprod(uction)?\b/i.test(target)) {
+    findings.push({
+      severity: "medium",
+      category: "deploy_risk",
+      message: `Deploy target "${target}" affects a production-like environment.`,
+    });
+  }
+
+  if (!actionInput.artifact_ref && /\bprod(uction)?\b/i.test(target)) {
+    findings.push({
+      severity: "medium",
+      category: "deploy_risk",
+      message: "Production deploy action is missing an artifact reference.",
+    });
+  }
+
+  if (/--force|--yes|--auto-approve|bash\s+-c|sh\s+-c|powershell|ssh\s|kubectl\s+apply|terraform\s+apply/i.test(command)) {
+    findings.push({
+      severity: "high",
+      category: "deploy_risk",
+      message: "Deploy command includes force flags or direct shell execution.",
+    });
+  }
+
+  if (!command) {
+    findings.push({
+      severity: "info",
+      category: "deploy_risk",
+      message: "Deploy action did not include an explicit deploy command.",
+    });
+  }
+
+  if (changeSummary && PROMPT_INJECTION_PATTERNS.some((pattern) => pattern.test(changeSummary))) {
+    findings.push({
+      severity: "medium",
+      category: "prompt_injection_surface",
+      message: "Deploy summary includes text that looks like prompt-injection guidance.",
+    });
+  }
+
+  return sortFindings(findings);
+}
+
+function maybeAddInlineSecretFinding(
+  findings: Finding[],
+  content: string,
+  file: string,
+  lineNumber: number,
+) {
+  if (!content.trim()) {
+    return;
+  }
+
+  const envSecret = content.match(
+    /\b(?:API_KEY|SECRET|TOKEN|PASSWORD|PRIVATE_KEY|ACCESS_KEY|SESSION_SECRET)\b\s*[:=]\s*([^\s#]+)/i,
+  );
+  const secretLiteral = content.match(/sk_(?:live|test)_[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9_-]{8,}|AIza[0-9A-Za-z_-]{8,}/);
+
+  if (envSecret || secretLiteral) {
+    findings.push({
+      severity: "critical",
+      category: "secret_exposure",
+      message: "Potential secret-bearing content was included in the action payload.",
+      file,
+      line: lineNumber,
+    });
+  }
 }
 
 function isPackageJsonMetadataKey(key: string): boolean {

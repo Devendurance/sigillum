@@ -241,8 +241,8 @@ function renderInspectOutput(
   console.log(`amount=${result.quote.amount} ${result.quote.currency}`);
   console.log(`payment_mode=${result.payment.mode}`);
   console.log(`payment_rail=${result.payment.rail}`);
-  if (result.payment.transaction) {
-    console.log(`payment_tx=${result.payment.transaction}`);
+  if (result.payment.transaction_hash) {
+    console.log(`payment_tx=${result.payment.transaction_hash}`);
   }
   if (result.payment.payment_reference) {
     console.log(`payment_ref=${result.payment.payment_reference}`);

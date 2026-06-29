@@ -76,7 +76,11 @@ export default async function ReceiptPage(
                 <code>{receipt.transaction_hash}</code>
               </a>
             ) : (
-              <code>Not recorded</code>
+              <code>
+                {receipt.settlement_scope === "batch"
+                  ? "Gateway payment is part of a settlement batch; Arc hash not yet attributable."
+                  : "Gateway payment confirmed; Arc settlement hash not yet attributable."}
+              </code>
             )}
           </section>
           <section className={`${styles.artifactCard} ${styles.hashCard}`} data-hover-card>
@@ -95,6 +99,23 @@ export default async function ReceiptPage(
               <DetailRow label="Action Type" value={receipt.action_type} />
               <DetailRow label="Rail" value={receipt.rail ?? "Unavailable"} />
               <DetailRow label="Network" value={receipt.network ?? "Unavailable"} />
+              <DetailRow
+                label="Settlement Status"
+                value={receipt.settlement_status ? receipt.settlement_status.replaceAll("_", " ") : "Unavailable"}
+              />
+              <DetailRow
+                label="Settlement Scope"
+                value={receipt.settlement_scope ? receipt.settlement_scope.replaceAll("_", " ") : "Unavailable"}
+              />
+              <DetailRow
+                label="Settlement Source"
+                value={receipt.settlement_source ? receipt.settlement_source.replaceAll("_", " ") : "Unavailable"}
+              />
+              <DetailRow label="Batch Reference" value={receipt.batch_reference ?? "Unavailable"} />
+              <DetailRow
+                label="Transaction Confirmed"
+                value={receipt.transaction_confirmed_at ? formatTimestamp(receipt.transaction_confirmed_at) : "Unavailable"}
+              />
               <DetailRow label="Timestamp" value={formatTimestamp(receipt.timestamp)} />
               <DetailRow label="Seal" value={receipt.seal} />
             </div>

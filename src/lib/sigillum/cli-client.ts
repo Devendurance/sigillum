@@ -1,7 +1,12 @@
 import { GatewayClient, type SupportedChainName } from "@circle-fin/x402-batching/client";
 import type { AgentDecision, QuoteResponse, SigillumReceipt } from "./types.ts";
 import type { PaymentRequirement } from "./payment/types.ts";
-import type { SigillumActionEnvelope } from "./lifecycle.ts";
+import type {
+  SigillumActionEnvelope,
+  SigillumCodeChangeEnvelope,
+  SigillumDependencyInstallEnvelope,
+  SigillumDeployActionEnvelope,
+} from "./lifecycle.ts";
 
 type HexString = `0x${string}`;
 
@@ -10,7 +15,12 @@ export type SigillumCliPaymentSummary = {
   mode: "demo" | "x402" | "unknown";
   rail: "local-demo" | "x402" | "unknown";
   payment_reference?: string;
-  transaction?: string;
+  transaction_hash?: string;
+  settlement_status?: string | null;
+  settlement_scope?: string | null;
+  settlement_source?: string | null;
+  transaction_confirmed_at?: string | null;
+  batch_reference?: string | null;
   requirement?: PaymentRequirement;
 };
 
@@ -29,6 +39,12 @@ type InspectSuccess = {
     mode?: "demo" | "x402";
     rail?: "local-demo" | "x402";
     payment_reference?: string;
+    transaction_hash?: string;
+    settlement_status?: string | null;
+    settlement_scope?: string | null;
+    settlement_source?: string | null;
+    transaction_confirmed_at?: string | null;
+    batch_reference?: string | null;
   };
 };
 
@@ -53,6 +69,17 @@ type InspectDiffOptions = {
   commitSha?: string;
 };
 
+type InspectActionOptions = {
+  envelope: SigillumActionEnvelope;
+  allowDemoConfirm?: boolean;
+};
+
+type InspectQuotedActionOptions = {
+  envelope: SigillumActionEnvelope;
+  quote: QuoteResponse;
+  allowDemoConfirm?: boolean;
+};
+
 export class SigillumCliError extends Error {
   readonly exitCode: 3;
   readonly phase: string;
@@ -70,142 +97,190 @@ export class SigillumCliError extends Error {
 export function createSigillumClient(options: CreateSigillumClientOptions) {
   const baseUrl = normalizeBaseUrl(options.baseUrl);
 
-  return {
-    async quote(diff: string): Promise<QuoteResponse> {
-      const response = await postJson(`${baseUrl}/api/quote`, buildActionEnvelope(diff, options.agentName));
-      if (!response.ok) {
-        throw new SigillumCliError("quote", `Quote request failed with HTTP ${response.status}.`);
-      }
+  async function quoteAction(envelope: SigillumActionEnvelope): Promise<QuoteResponse> {
+    const response = await postJson(`${baseUrl}/api/quote`, envelope);
+    if (!response.ok) {
+      throw new SigillumCliError("quote", `Quote request failed with HTTP ${response.status}.`);
+    }
 
-      return (await response.json()) as QuoteResponse;
-    },
+    return (await response.json()) as QuoteResponse;
+  }
 
-    async inspectDiff({
-      diff,
-      allowDemoConfirm = options.allowDemoConfirm ?? true,
-      repo,
-      branch,
-      commitSha,
-    }: InspectDiffOptions): Promise<SigillumInspectResult> {
-      const quote = await this.quote(diff);
-      const inspectUrl = `${baseUrl}/api/inspect`;
-      const actionEnvelope = buildActionEnvelope(diff, options.agentName, { repo, branch, commitSha });
-      const firstInspectResponse = await postJson(inspectUrl, {
-        ...actionEnvelope,
-        action_id: quote.action_id,
-        quote_id: quote.quote_id,
+  async function inspectAction({
+    envelope,
+    allowDemoConfirm = options.allowDemoConfirm ?? true,
+  }: InspectActionOptions): Promise<SigillumInspectResult> {
+    const quote = await quoteAction(envelope);
+    return inspectQuotedAction({
+      envelope,
+      quote,
+      allowDemoConfirm,
+    });
+  }
+
+  async function inspectQuotedAction({
+    envelope,
+    quote,
+    allowDemoConfirm = options.allowDemoConfirm ?? true,
+  }: InspectQuotedActionOptions): Promise<SigillumInspectResult> {
+    const inspectUrl = `${baseUrl}/api/inspect`;
+    const firstInspectResponse = await postJson(inspectUrl, {
+      ...envelope,
+      action_id: quote.action_id,
+      quote_id: quote.quote_id,
+    });
+
+    if (firstInspectResponse.ok) {
+      const result = (await firstInspectResponse.json()) as InspectSuccess;
+      return toInspectResult({
+        quote,
+        result,
+        payment: {
+          amount: quote.amount,
+          mode: result.payment?.mode ?? "unknown",
+          rail: result.payment?.rail ?? "unknown",
+          payment_reference: result.payment?.payment_reference,
+          transaction_hash: normalizeTransactionHash(result.payment?.transaction_hash),
+          settlement_status: result.payment?.settlement_status ?? null,
+          settlement_scope: result.payment?.settlement_scope ?? null,
+          settlement_source: result.payment?.settlement_source ?? null,
+          transaction_confirmed_at: result.payment?.transaction_confirmed_at ?? null,
+          batch_reference: result.payment?.batch_reference ?? null,
+        },
       });
+    }
 
-      if (firstInspectResponse.ok) {
-        const result = (await firstInspectResponse.json()) as InspectSuccess;
-        return toInspectResult({
-          quote,
-          result,
-          payment: {
-            amount: quote.amount,
-            mode: result.payment?.mode ?? "unknown",
-            rail: result.payment?.rail ?? "unknown",
-            payment_reference: result.payment?.payment_reference,
-            transaction: result.payment?.payment_reference,
-          },
-        });
-      }
+    const firstInspectBody = (await safeJson(firstInspectResponse)) as InspectFailureBody | null;
+    if (firstInspectResponse.status !== 402) {
+      throw new SigillumCliError(
+        "inspect",
+        `Inspect request failed with HTTP ${firstInspectResponse.status}.`,
+        readReason(firstInspectBody) ?? undefined,
+      );
+    }
 
-      const firstInspectBody = (await safeJson(firstInspectResponse)) as InspectFailureBody | null;
-      if (firstInspectResponse.status !== 402) {
-        throw new SigillumCliError(
-          "inspect",
-          `Inspect request failed with HTTP ${firstInspectResponse.status}.`,
-          readReason(firstInspectBody) ?? undefined,
-        );
-      }
+    const declaredMode =
+      readHeader(firstInspectResponse, "x-sigillum-payment-mode") ??
+      readNestedString(firstInspectBody, "payment", "mode") ??
+      "unknown";
 
-      const declaredMode =
-        readHeader(firstInspectResponse, "x-sigillum-payment-mode") ??
-        readNestedString(firstInspectBody, "payment", "mode") ??
-        "unknown";
-
-      if (declaredMode === "demo") {
-        if (!allowDemoConfirm) {
-          throw new SigillumCliError(
-            "payment",
-            "Server is in demo payment mode.",
-            "Rerun with demo confirmation enabled or switch the server to x402 mode.",
-          );
-        }
-
-        const demoResponse = await postJson(inspectUrl, {
-          ...actionEnvelope,
-          action_id: quote.action_id,
-          quote_id: quote.quote_id,
-          payment_confirmed: true,
-          payment_proof: "sigillum-cli-demo-confirmation",
-        });
-
-        if (!demoResponse.ok) {
-          const demoBody = (await safeJson(demoResponse)) as InspectFailureBody | null;
-          throw new SigillumCliError(
-            "payment",
-            `Demo payment confirmation failed with HTTP ${demoResponse.status}.`,
-            readReason(demoBody) ?? undefined,
-          );
-        }
-
-        const result = (await demoResponse.json()) as InspectSuccess;
-        return toInspectResult({
-          quote,
-          result,
-          payment: {
-            amount: quote.amount,
-            mode: result.payment?.mode ?? "demo",
-            rail: result.payment?.rail ?? "local-demo",
-            payment_reference: result.payment?.payment_reference,
-            transaction: result.payment?.payment_reference,
-            requirement: firstInspectBody?.payment,
-          },
-        });
-      }
-
-      const gateway = await createGatewayClientFromEnv();
-      const autoDepositAmount = readEnv("X402_BUYER_AUTO_DEPOSIT_USDC");
-
-      if (autoDepositAmount) {
-        await gateway.deposit(autoDepositAmount);
-      }
-
-      try {
-        const paidResult = (await gateway.pay(inspectUrl, {
-          method: "POST",
-          body: {
-            ...actionEnvelope,
-            action_id: quote.action_id,
-            quote_id: quote.quote_id,
-          },
-          headers: {
-            "Content-Type": "application/json",
-          },
-        })) as { data: InspectSuccess; transaction: string };
-
-        return toInspectResult({
-          quote,
-          result: paidResult.data,
-          payment: {
-            amount: quote.amount,
-            mode: paidResult.data.payment?.mode ?? "x402",
-            rail: paidResult.data.payment?.rail ?? "x402",
-            payment_reference: paidResult.data.payment?.payment_reference ?? paidResult.transaction,
-            transaction: paidResult.transaction,
-            requirement: firstInspectBody?.payment,
-          },
-        });
-      } catch (error) {
+    if (declaredMode === "demo") {
+      if (!allowDemoConfirm) {
         throw new SigillumCliError(
           "payment",
-          "x402 payment flow failed.",
-          error instanceof Error ? error.message : String(error),
+          "Server is in demo payment mode.",
+          "Rerun with demo confirmation enabled or switch the server to x402 mode.",
         );
       }
-    },
+
+      const demoResponse = await postJson(inspectUrl, {
+        ...envelope,
+        action_id: quote.action_id,
+        quote_id: quote.quote_id,
+        payment_confirmed: true,
+        payment_proof: "sigillum-cli-demo-confirmation",
+      });
+
+      if (!demoResponse.ok) {
+        const demoBody = (await safeJson(demoResponse)) as InspectFailureBody | null;
+        throw new SigillumCliError(
+          "payment",
+          `Demo payment confirmation failed with HTTP ${demoResponse.status}.`,
+          readReason(demoBody) ?? undefined,
+        );
+      }
+
+      const result = (await demoResponse.json()) as InspectSuccess;
+      return toInspectResult({
+        quote,
+        result,
+        payment: {
+          amount: quote.amount,
+          mode: result.payment?.mode ?? "demo",
+          rail: result.payment?.rail ?? "local-demo",
+          payment_reference: result.payment?.payment_reference,
+          transaction_hash: normalizeTransactionHash(result.payment?.transaction_hash),
+          settlement_status: result.payment?.settlement_status ?? null,
+          settlement_scope: result.payment?.settlement_scope ?? null,
+          settlement_source: result.payment?.settlement_source ?? null,
+          transaction_confirmed_at: result.payment?.transaction_confirmed_at ?? null,
+          batch_reference: result.payment?.batch_reference ?? null,
+          requirement: firstInspectBody?.payment,
+        },
+      });
+    }
+
+    const gateway = await createGatewayClientFromEnv();
+    const autoDepositAmount = readEnv("X402_BUYER_AUTO_DEPOSIT_USDC");
+
+    if (autoDepositAmount) {
+      await gateway.deposit(autoDepositAmount);
+    }
+
+    try {
+      const paidResult = (await gateway.pay(inspectUrl, {
+        method: "POST",
+        body: {
+          ...envelope,
+          action_id: quote.action_id,
+          quote_id: quote.quote_id,
+        },
+        headers: {
+          "Content-Type": "application/json",
+        },
+      })) as { data: InspectSuccess; transaction: string };
+
+      return toInspectResult({
+        quote,
+        result: paidResult.data,
+        payment: {
+          amount: quote.amount,
+          mode: paidResult.data.payment?.mode ?? "x402",
+          rail: paidResult.data.payment?.rail ?? "x402",
+          payment_reference: paidResult.data.payment?.payment_reference,
+          transaction_hash:
+            normalizeTransactionHash(paidResult.data.payment?.transaction_hash) ??
+            normalizeTransactionHash(paidResult.transaction),
+          settlement_status: paidResult.data.payment?.settlement_status ?? null,
+          settlement_scope: paidResult.data.payment?.settlement_scope ?? null,
+          settlement_source: paidResult.data.payment?.settlement_source ?? null,
+          transaction_confirmed_at: paidResult.data.payment?.transaction_confirmed_at ?? null,
+          batch_reference: paidResult.data.payment?.batch_reference ?? null,
+          requirement: firstInspectBody?.payment,
+        },
+      });
+    } catch (error) {
+      throw new SigillumCliError(
+        "payment",
+        "x402 payment flow failed.",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  async function quote(diff: string): Promise<QuoteResponse> {
+    return quoteAction(buildCodeChangeEnvelope(diff, options.agentName));
+  }
+
+  async function inspectDiff({
+    diff,
+    allowDemoConfirm = options.allowDemoConfirm ?? true,
+    repo,
+    branch,
+    commitSha,
+  }: InspectDiffOptions): Promise<SigillumInspectResult> {
+    return inspectAction({
+      envelope: buildCodeChangeEnvelope(diff, options.agentName, { repo, branch, commitSha }),
+      allowDemoConfirm,
+    });
+  }
+
+  return {
+    quote,
+    quoteAction,
+    inspectDiff,
+    inspectAction,
+    inspectQuotedAction,
   };
 }
 
@@ -280,7 +355,7 @@ function toInspectResult({
   };
 }
 
-function buildActionEnvelope(
+export function buildCodeChangeEnvelope(
   diff: string,
   agentName = "Sigillum CLI",
   metadata?: {
@@ -288,7 +363,7 @@ function buildActionEnvelope(
     branch?: string;
     commitSha?: string;
   },
-): SigillumActionEnvelope {
+): SigillumCodeChangeEnvelope {
   return {
     agent: {
       name: agentName,
@@ -301,6 +376,34 @@ function buildActionEnvelope(
       ...(metadata?.branch ? { branch: metadata.branch } : {}),
       ...(metadata?.commitSha ? { commit_sha: metadata.commitSha } : {}),
     },
+  };
+}
+
+export function buildDependencyInstallEnvelope(
+  input: SigillumDependencyInstallEnvelope["action_input"],
+  agentName = "DependencyInstallAgent",
+): SigillumDependencyInstallEnvelope {
+  return {
+    agent: {
+      name: agentName,
+      type: "runner",
+    },
+    action_type: "dependency_install",
+    action_input: input,
+  };
+}
+
+export function buildDeployActionEnvelope(
+  input: SigillumDeployActionEnvelope["action_input"],
+  agentName = "DeployActionAgent",
+): SigillumDeployActionEnvelope {
+  return {
+    agent: {
+      name: agentName,
+      type: "runner",
+    },
+    action_type: "deploy_action",
+    action_input: input,
   };
 }
 
@@ -369,4 +472,8 @@ function readNestedString(
 
   const nestedValue = value[outerKey][innerKey];
   return typeof nestedValue === "string" ? nestedValue : undefined;
+}
+
+function normalizeTransactionHash(value: string | undefined) {
+  return value && /^0x[a-fA-F0-9]{64}$/.test(value) ? value : undefined;
 }
