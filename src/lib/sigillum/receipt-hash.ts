@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 import type { SigillumReceipt } from "./types";
+import type { SigillumPublicReceipt } from "./types";
 
 export function createSigillumReceiptHash(receipt: SigillumReceipt) {
+  const canonical = canonicalizeValue(receipt);
+  return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
+}
+
+export function createSigillumPublicReceiptHash(receipt: Omit<SigillumPublicReceipt, "receipt_hash">) {
   const canonical = canonicalizeValue(receipt);
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }

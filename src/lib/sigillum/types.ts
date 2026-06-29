@@ -116,6 +116,12 @@ export type SigillumPaymentSummary = {
   batch_reference?: string | null;
 };
 
+export type SigillumPaymentSnapshot = SigillumPaymentSummary & {
+  amount?: string;
+  currency?: "USDC";
+  network?: string | null;
+};
+
 export type SigillumQuoteLifecyclePayload = {
   diff_sha256: string;
   demo_fallback_used: boolean;
@@ -194,6 +200,12 @@ export type SigillumLiveActionRow = {
   file_types: string[];
   safe_summary: string;
   timestamp: string;
+  created_at: string;
+  updated_at: string | null;
+  quote: Quote | null;
+  payment: SigillumPaymentSnapshot | null;
+  receipt: SigillumReceipt | null;
+  agent_decision_detail: AgentDecision | null;
   lifecycle_events: SigillumLiveActionLifecycleEvent[];
 };
 

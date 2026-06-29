@@ -39,6 +39,14 @@ type AutomationAgentRunResult =
       reason: string;
       action_id?: string;
       quote_id?: string;
+    }
+  | {
+      agent: AutomationAgentName;
+      action_type: SigillumActionType;
+      status: "failed";
+      reason: string;
+      action_id?: string;
+      quote_id?: string;
     };
 
 type AutomationAgentCompletedResult = Extract<
@@ -121,131 +129,158 @@ export async function runSigillumAutomationTick({
       }
     }
 
-    const envelope = definition.buildEnvelope();
-    const quote = await client.quoteAction({
-      ...envelope,
-      idempotency_key: createAutomationIdempotencyKey({
-        agentName: definition.name,
-        actionType: definition.actionType,
-        now,
-      }),
-    });
+    let quoteId: string | undefined;
+    let actionPublicId: string | undefined;
 
-    const action = await findActionByPublicId(quote.action_id);
-    if (!action) {
-      logSigillumInfo("automation.agent.skipped", {
-        request_tag: requestTag,
-        agent: definition.name,
-        action_type: definition.actionType,
-        reason: "persisted_action_missing_after_quote",
-        action_id: quote.action_id,
-        quote_id: quote.quote_id,
-      });
-      results.push({
-        agent: definition.name,
-        action_type: definition.actionType,
-        status: "skipped",
-        reason: "persisted_action_missing_after_quote",
-        action_id: quote.action_id,
-        quote_id: quote.quote_id,
-      });
-      continue;
-    }
-
-    const completedOutcome = await findCompletedOutcome(action.id);
-    if (completedOutcome) {
-      logSigillumInfo("automation.agent.skipped", {
-        request_tag: requestTag,
-        agent: definition.name,
-        action_type: definition.actionType,
-        reason: "existing_completed_outcome",
-        action_id: quote.action_id,
-        quote_id: quote.quote_id,
-      });
-      results.push({
-        agent: definition.name,
-        action_type: definition.actionType,
-        status: "skipped",
-        reason: "existing_completed_outcome",
-        action_id: quote.action_id,
-        quote_id: quote.quote_id,
-      });
-      continue;
-    }
-
-    const settledSpend = await getSettledAgentSpendSince({
-      agentName: definition.name,
-      startedAt: startOfUtcDay,
-    });
-
-    if (wouldExceedDailyCap({
-      settledSpendUsdc: settledSpend,
-      nextQuoteAmountUsdc: quote.amount,
-      dailyCapUsdc: definition.dailyCapUsdc,
-    })) {
-      logSigillumInfo("automation.agent.skipped", {
-        request_tag: requestTag,
-        agent: definition.name,
-        action_type: definition.actionType,
-        reason: "daily_cap_exceeded",
-        action_id: quote.action_id,
-        quote_id: quote.quote_id,
-        settled_spend_usdc: settledSpend,
-        next_quote_amount_usdc: quote.amount,
-        daily_cap_usdc: definition.dailyCapUsdc,
-      });
-      results.push({
-        agent: definition.name,
-        action_type: definition.actionType,
-        status: "skipped",
-        reason: "daily_cap_exceeded",
-        action_id: quote.action_id,
-        quote_id: quote.quote_id,
-      });
-      continue;
-    }
-
-    logSigillumInfo("automation.agent.running", {
-      request_tag: requestTag,
-      agent: definition.name,
-      action_type: definition.actionType,
-      action_id: quote.action_id,
-      quote_id: quote.quote_id,
-      amount: quote.amount,
-    });
-
-    const result = await client.inspectQuotedAction({
-      envelope: {
+    try {
+      const envelope = definition.buildEnvelope();
+      const quote = await client.quoteAction({
         ...envelope,
-        idempotency_key: envelope.idempotency_key ?? createAutomationIdempotencyKey({
+        idempotency_key: createAutomationIdempotencyKey({
           agentName: definition.name,
           actionType: definition.actionType,
           now,
         }),
-      },
-      quote,
-    });
+      });
 
-    const mappedResult = mapInspectResult(definition.name, definition.actionType, result);
-    logSigillumInfo("automation.agent.completed", {
-      request_tag: requestTag,
-      agent: definition.name,
-      action_type: definition.actionType,
-      action_id: mappedResult.action_id,
-      quote_id: mappedResult.quote_id,
-      receipt_id: mappedResult.receipt_id,
-      payment_reference: mappedResult.payment_reference,
-      transaction_hash: mappedResult.transaction_hash,
-      recommendation: mappedResult.recommendation,
-      agent_decision: mappedResult.agent_decision,
-    });
-    results.push(mappedResult);
+      quoteId = quote.quote_id;
+      actionPublicId = quote.action_id;
+
+      const action = await findActionByPublicId(quote.action_id);
+      if (!action) {
+        logSigillumInfo("automation.agent.skipped", {
+          request_tag: requestTag,
+          agent: definition.name,
+          action_type: definition.actionType,
+          reason: "persisted_action_missing_after_quote",
+          action_id: quote.action_id,
+          quote_id: quote.quote_id,
+        });
+        results.push({
+          agent: definition.name,
+          action_type: definition.actionType,
+          status: "skipped",
+          reason: "persisted_action_missing_after_quote",
+          action_id: quote.action_id,
+          quote_id: quote.quote_id,
+        });
+        continue;
+      }
+
+      const completedOutcome = await findCompletedOutcome(action.id);
+      if (completedOutcome) {
+        logSigillumInfo("automation.agent.skipped", {
+          request_tag: requestTag,
+          agent: definition.name,
+          action_type: definition.actionType,
+          reason: "existing_completed_outcome",
+          action_id: quote.action_id,
+          quote_id: quote.quote_id,
+        });
+        results.push({
+          agent: definition.name,
+          action_type: definition.actionType,
+          status: "skipped",
+          reason: "existing_completed_outcome",
+          action_id: quote.action_id,
+          quote_id: quote.quote_id,
+        });
+        continue;
+      }
+
+      const settledSpend = await getSettledAgentSpendSince({
+        agentName: definition.name,
+        startedAt: startOfUtcDay,
+      });
+
+      if (wouldExceedDailyCap({
+        settledSpendUsdc: settledSpend,
+        nextQuoteAmountUsdc: quote.amount,
+        dailyCapUsdc: definition.dailyCapUsdc,
+      })) {
+        logSigillumInfo("automation.agent.skipped", {
+          request_tag: requestTag,
+          agent: definition.name,
+          action_type: definition.actionType,
+          reason: "daily_cap_exceeded",
+          action_id: quote.action_id,
+          quote_id: quote.quote_id,
+          settled_spend_usdc: settledSpend,
+          next_quote_amount_usdc: quote.amount,
+          daily_cap_usdc: definition.dailyCapUsdc,
+        });
+        results.push({
+          agent: definition.name,
+          action_type: definition.actionType,
+          status: "skipped",
+          reason: "daily_cap_exceeded",
+          action_id: quote.action_id,
+          quote_id: quote.quote_id,
+        });
+        continue;
+      }
+
+      logSigillumInfo("automation.agent.running", {
+        request_tag: requestTag,
+        agent: definition.name,
+        action_type: definition.actionType,
+        action_id: quote.action_id,
+        quote_id: quote.quote_id,
+        amount: quote.amount,
+      });
+
+      const result = await client.inspectQuotedAction({
+        envelope: {
+          ...envelope,
+          idempotency_key: envelope.idempotency_key ?? createAutomationIdempotencyKey({
+            agentName: definition.name,
+            actionType: definition.actionType,
+            now,
+          }),
+        },
+        quote,
+      });
+
+      const mappedResult = mapInspectResult(definition.name, definition.actionType, result);
+      logSigillumInfo("automation.agent.completed", {
+        request_tag: requestTag,
+        agent: definition.name,
+        action_type: definition.actionType,
+        action_id: mappedResult.action_id,
+        quote_id: mappedResult.quote_id,
+        receipt_id: mappedResult.receipt_id,
+        payment_reference: mappedResult.payment_reference,
+        transaction_hash: mappedResult.transaction_hash,
+        recommendation: mappedResult.recommendation,
+        agent_decision: mappedResult.agent_decision,
+      });
+      results.push(mappedResult);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      logSigillumInfo("automation.agent.failed", {
+        request_tag: requestTag,
+        agent: definition.name,
+        action_type: definition.actionType,
+        action_id: actionPublicId,
+        quote_id: quoteId,
+        reason,
+      });
+      results.push({
+        agent: definition.name,
+        action_type: definition.actionType,
+        status: "failed",
+        reason,
+        action_id: actionPublicId,
+        quote_id: quoteId,
+      });
+    }
   }
 
   logSigillumInfo("automation.tick.completed", {
     request_tag: requestTag,
     completed: results.filter((entry) => entry.status === "completed").length,
     skipped: results.filter((entry) => entry.status === "skipped").length,
+    failed: results.filter((entry) => entry.status === "failed").length,
   });
 
   return {

@@ -6,7 +6,7 @@ import type {
   SigillumSettlementScope,
   SigillumSettlementSource,
   SigillumSettlementStatus,
-} from "@/lib/sigillum/payment/types";
+} from "../sigillum/payment/types";
 import {
   getCircleGatewayAuthHeaders,
   getSigillumX402FacilitatorUrl,

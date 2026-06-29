@@ -17,6 +17,7 @@ import type {
   Finding,
   InspectedUnits,
   Quote,
+  SigillumPaymentSnapshot,
   SigillumLiveActionLifecycleEvent,
   SigillumLiveActionRow,
   SigillumPublicReceipt,
@@ -37,7 +38,7 @@ import type {
   SigillumSettlementSource,
   SigillumSettlementStatus,
 } from "@/lib/sigillum/payment/types";
-import { createSigillumReceiptHash } from "@/lib/sigillum/receipt-hash";
+import { createSigillumPublicReceiptHash } from "@/lib/sigillum/receipt-hash";
 import { formatSigillumNetworkLabel } from "@/lib/sigillum/arcscan";
 import { getSigillumX402Network } from "@/lib/sigillum/payment/config";
 import {
@@ -597,17 +598,26 @@ export async function listLiveActions(): Promise<SigillumLiveActionRow[]> {
       actionInputSummary: actions.actionInputSummary,
       currentStage: actions.currentStage,
       timestamp: actions.createdAt,
+      updatedAt: actions.updatedAt,
       agentName: agents.name,
       agentPublicId: agents.publicId,
       agentId: agents.externalAgentId,
+      quoteId: quotes.quoteId,
+      quoteCurrency: quotes.currency,
       amount: quotes.amount,
+      quoteExpiresAt: quotes.expiresAt,
       inspectedUnits: receipts.inspectedUnits,
       quoteInspectedUnits: quotes.inspectedUnits,
       receiptId: receipts.receiptId,
+      receiptJson: receipts.receiptJson,
+      receiptTimestamp: receipts.receiptTimestamp,
       recommendation: receipts.recommendation,
       riskScore: receipts.score,
       findings: receipts.findings,
       decision: agentDecisions.decision,
+      decisionReason: agentDecisions.reason,
+      decisionNextAction: agentDecisions.nextAction,
+      decisionPolicyMatched: agentDecisions.policyMatched,
     })
     .from(actions)
     .innerJoin(agents, eq(actions.agentId, agents.id))
@@ -748,6 +758,44 @@ export async function listLiveActions(): Promise<SigillumLiveActionRow[]> {
     const fileTypes = [...new Set(findings.map((finding) => toFileType(finding.file)).filter(Boolean) as string[])];
     const inspectedUnits = row.inspectedUnits ?? row.quoteInspectedUnits ?? null;
     const payment = latestPaymentByAction.get(row.actionRowId);
+    const quote =
+      row.quoteId && row.amount && row.quoteExpiresAt && row.quoteInspectedUnits
+        ? {
+            quote_id: row.quoteId,
+            currency: "USDC" as const,
+            amount: row.amount,
+            inspected_units: row.quoteInspectedUnits,
+            expires_at: row.quoteExpiresAt.toISOString(),
+          }
+        : null;
+    const paymentSnapshot: SigillumPaymentSnapshot | null = payment && payment.rail
+      ? {
+          amount: row.amount ?? undefined,
+          currency: row.amount ? "USDC" : undefined,
+          mode: payment.rail === "x402" ? "x402" : "demo",
+          rail: payment.rail,
+          payment_reference: payment.paymentReference ?? undefined,
+          transaction_hash: payment.transactionHash ?? undefined,
+          settlement_status: payment.settlementStatus ?? null,
+          settlement_scope: payment.settlementScope ?? null,
+          settlement_source: payment.settlementSource ?? null,
+          transaction_confirmed_at: payment.transactionConfirmedAt ?? null,
+          batch_reference: payment.batchReference ?? null,
+          network: payment.rail === "x402" ? network : null,
+        }
+      : null;
+    const receipt = row.receiptJson ?? null;
+    const agentDecisionDetail =
+      row.decision === "continue_merge" ||
+      row.decision === "request_patch" ||
+      row.decision === "stop_merge"
+        ? {
+            agent_decision: row.decision as AgentDecision["agent_decision"],
+            reason: row.decisionReason ?? "No decision reason recorded.",
+            next_action: row.decisionNextAction ?? "No next action recorded.",
+            policy_matched: row.decisionPolicyMatched ?? "No policy recorded.",
+          }
+        : null;
 
     return {
       action_id: row.actionId,
@@ -789,6 +837,12 @@ export async function listLiveActions(): Promise<SigillumLiveActionRow[]> {
         sourceHash: latestInspectionByAction.get(row.actionRowId) ?? null,
       }),
       timestamp: row.timestamp.toISOString(),
+      created_at: row.timestamp.toISOString(),
+      updated_at: row.updatedAt?.toISOString() ?? null,
+      quote,
+      payment: paymentSnapshot,
+      receipt,
+      agent_decision_detail: agentDecisionDetail,
       lifecycle_events: lifecycleByAction.get(row.actionRowId) ?? [],
     };
   });
@@ -899,7 +953,7 @@ export async function findPublicReceiptByReceiptId(receiptId: string): Promise<S
       ? await refreshPaymentRow(paymentRow.id)
       : paymentRow;
 
-  return {
+  const publicReceipt: Omit<SigillumPublicReceipt, "receipt_hash"> = {
     receipt_id: receiptRow.receiptId,
     action_id: action.publicId,
     agent_name: agent.name,
@@ -919,7 +973,6 @@ export async function findPublicReceiptByReceiptId(receiptId: string): Promise<S
     settlement_source: normalizeSettlementSource(resolvedPaymentRow?.settlementSource),
     transaction_confirmed_at: resolvedPaymentRow?.transactionConfirmedAt?.toISOString() ?? null,
     batch_reference: resolvedPaymentRow?.batchReference ?? null,
-    receipt_hash: createSigillumReceiptHash(receiptRow.receiptJson),
     inspected_units: receiptRow.inspectedUnits,
     findings: receiptRow.findings,
     patch_recommendation: receiptRow.receiptJson.patch_recommendation,
@@ -931,6 +984,11 @@ export async function findPublicReceiptByReceiptId(receiptId: string): Promise<S
     },
     timestamp: receiptRow.receiptTimestamp.toISOString(),
     seal: receiptRow.receiptJson.seal,
+  };
+
+  return {
+    ...publicReceipt,
+    receipt_hash: createSigillumPublicReceiptHash(publicReceipt),
   };
 }
 

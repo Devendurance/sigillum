@@ -1251,7 +1251,11 @@ function normalizeRecord(entry: unknown, index: number): LiveActionRecord | null
   const quote = normalizeQuote(raw.quote ?? raw);
   const receipt = normalizeReceipt(raw.receipt ?? raw);
   const agentDecision = normalizeAgentDecision(
-    typeof raw.agent_decision === "object" && raw.agent_decision !== null ? raw.agent_decision : raw,
+    typeof raw.agent_decision_detail === "object" && raw.agent_decision_detail !== null
+      ? raw.agent_decision_detail
+      : typeof raw.agent_decision === "object" && raw.agent_decision !== null
+        ? raw.agent_decision
+        : raw,
   );
   const payment = normalizePayment(raw.payment ?? raw);
 
