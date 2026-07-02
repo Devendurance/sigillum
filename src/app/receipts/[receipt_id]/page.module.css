@@ -6,6 +6,7 @@
 .receiptProofBoard {
   display: grid;
   gap: 24px;
+  min-width: 0;
 }
 
 .receiptHero {
@@ -195,6 +196,7 @@
   font-size: 15px;
   line-height: 1.4;
   word-break: break-word;
+  text-wrap: pretty;
 }
 
 .findingRow p,
@@ -259,5 +261,61 @@
 @media (max-width: 760px) {
   .receiptPageShell {
     padding: 16px 16px 32px;
+  }
+
+  .receiptProofBoard {
+    gap: 18px;
+  }
+
+  .heroCopy h1 {
+    font-size: clamp(30px, 10vw, 42px);
+    line-height: 1.02;
+  }
+
+  .heroActions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .primaryAction,
+  .secondaryAction {
+    width: 100%;
+  }
+
+  .artifactCard,
+  .metricCard,
+  .detailPanel,
+  .findingPanel,
+  .jsonPanel {
+    border-radius: 20px;
+  }
+
+  .artifactCard,
+  .metricCard,
+  .detailPanel,
+  .findingPanel {
+    padding: 18px;
+  }
+
+  .metricGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .metricCard strong {
+    font-size: clamp(24px, 10vw, 34px);
+  }
+
+  .hashCard code {
+    margin-top: 14px;
+    font-size: 12px;
+  }
+
+  .jsonToolbar {
+    align-items: flex-start;
+  }
+
+  .jsonPanel {
+    min-height: 280px;
+    padding: 18px;
   }
 }

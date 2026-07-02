@@ -29,7 +29,10 @@ export default async function ReceiptPage(
               agent decision.
             </p>
             <div className={styles.heroActions}>
-              <a className={styles.primaryAction} href={`/api/receipts/${receipt.receipt_id}?download=1`}>
+              <a className={styles.primaryAction} href={`/api/receipts/${receipt.receipt_id}/pdf`}>
+                Download PDF
+              </a>
+              <a className={styles.secondaryAction} href={`/api/receipts/${receipt.receipt_id}?download=1`}>
                 Download JSON
               </a>
               <a className={styles.secondaryAction} href={`/api/receipts/${receipt.receipt_id}`}>

@@ -3,6 +3,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
+import { Menu, X } from "lucide";
+import { LucideIcon } from "@/components/ui/lucide-icon";
 import { ScrollChoreography } from "@/components/motion/ScrollChoreography";
 import { SmoothScroll } from "@/components/motion/SmoothScroll";
 
@@ -103,16 +105,50 @@ export default function Home() {
           type="button"
           aria-expanded={menuOpen}
           aria-controls="mobile-menu"
+          aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
           onClick={() => setMenuOpen((open) => !open)}
         >
-          <span />
-          <span />
-          <span />
+          <LucideIcon icon={menuOpen ? X : Menu} label={menuOpen ? "Close menu" : "Open menu"} size={20} />
         </button>
       </header>
 
-      {menuOpen ? (
-        <nav id="mobile-menu" className="mobile-menu" aria-label="Mobile">
+      <button
+        aria-hidden={!menuOpen}
+        aria-label="Close navigation menu"
+        className={`mobile-drawer-backdrop ${menuOpen ? "mobile-drawer-backdrop-open" : ""}`}
+        onClick={() => setMenuOpen(false)}
+        tabIndex={menuOpen ? 0 : -1}
+        type="button"
+      />
+      <nav
+        id="mobile-menu"
+        aria-hidden={!menuOpen}
+        aria-label="Mobile"
+        className={`mobile-menu ${menuOpen ? "mobile-menu-open" : ""}`}
+      >
+        <div className="mobile-menu-header">
+          <Link className="brand-mark" href="/" aria-label="Sigillum home" onClick={() => setMenuOpen(false)}>
+            <Image
+              src="/images/Untitled design (15).webp"
+              alt=""
+              aria-hidden="true"
+              width={32}
+              height={32}
+              className="brand-mark-icon"
+              priority
+            />
+            Sigillum
+          </Link>
+          <button
+            aria-label="Close navigation menu"
+            className="mobile-menu-close"
+            onClick={() => setMenuOpen(false)}
+            type="button"
+          >
+            <LucideIcon icon={X} label="Close menu" size={18} />
+          </button>
+        </div>
+        <div className="mobile-menu-links">
           <a href="#product" onClick={() => setMenuOpen(false)}>
             Product
           </a>
@@ -125,11 +161,11 @@ export default function Home() {
           <a href="#developers" onClick={() => setMenuOpen(false)}>
             Docs
           </a>
-          <Link href="/dashboard" onClick={() => setMenuOpen(false)}>
-            Open live dashboard
-          </Link>
-        </nav>
-      ) : null}
+        </div>
+        <Link className="mobile-menu-cta" href="/dashboard" onClick={() => setMenuOpen(false)}>
+          Open live dashboard
+        </Link>
+      </nav>
 
       <section className="hero-section" id="product" data-motion="hero">
         <div className="hero-copy">

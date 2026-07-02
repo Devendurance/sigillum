@@ -1,0 +1,384 @@
+.shell {
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.frame {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 20px;
+  width: min(1480px, 100%);
+  margin: 0 auto;
+  align-items: start;
+  overflow: visible;
+}
+
+.rail {
+  position: sticky;
+  top: 20px;
+  z-index: 30;
+  display: grid;
+  gap: 18px;
+  align-content: start;
+  min-height: calc(100vh - 40px);
+  padding: 18px 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 28px;
+  background: linear-gradient(180deg, rgba(233, 236, 245, 0.98), rgba(241, 243, 248, 0.94));
+  box-shadow: 0 18px 48px rgba(17, 19, 24, 0.08);
+  overflow: visible;
+}
+
+.logoLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  min-height: 52px;
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 650;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.logoIcon {
+  border-radius: 8px;
+}
+
+.logoWordmark {
+  display: none;
+}
+
+.railHeader {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+}
+
+.railEyebrow,
+.navMeta,
+.mobileMeta,
+.soonBadge {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.railCopy {
+  display: none;
+  margin: 0;
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+
+.menuButton {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  width: 44px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--paper);
+  cursor: pointer;
+}
+
+.menuButton:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
+}
+
+.menuButton svg {
+  color: var(--ink);
+}
+
+.mobileHeader {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 10px 30px rgba(17, 19, 24, 0.06);
+}
+
+.mobileHeaderCopy {
+  display: grid;
+  gap: 4px;
+}
+
+.mobileHeaderTitle {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 620;
+  line-height: 1;
+}
+
+.nav {
+  display: grid;
+  gap: 10px;
+}
+
+.navSection {
+  display: grid;
+  gap: 8px;
+}
+
+.navLink,
+.navButtonLike {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-items: center;
+  min-height: 52px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.56);
+  color: var(--ink);
+  text-decoration: none;
+  transition: transform 160ms ease, background-color 160ms ease, border-color 160ms ease, opacity 160ms ease;
+}
+
+.navLink:hover,
+.navButtonLike:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(17, 19, 24, 0.08);
+}
+
+.navLinkActive {
+  background: var(--ink);
+  color: var(--background);
+  border-color: var(--ink);
+}
+
+.navLinkActive .navMeta,
+.navLinkActive .soonBadge {
+  color: rgba(248, 248, 246, 0.72);
+}
+
+.navIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.64);
+  color: var(--ink);
+}
+
+.navLinkActive .navIcon,
+.navButtonLike:hover .navIcon,
+.navLink:hover .navIcon {
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.navLinkActive .navIcon {
+  color: var(--ink);
+}
+
+.navLabel {
+  display: none;
+  gap: 4px;
+  min-width: 0;
+}
+
+.navTitle {
+  font-weight: 780;
+  line-height: 1.2;
+}
+
+.navMeta {
+  letter-spacing: 0.08em;
+}
+
+.navTooltip {
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  z-index: 60;
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid rgba(17, 19, 24, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 10px 30px rgba(17, 19, 24, 0.08);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-50%) translateX(-6px);
+  transition: opacity 160ms ease, transform 160ms ease;
+  white-space: nowrap;
+}
+
+.navLink:hover .navTooltip,
+.navLink:focus-visible .navTooltip,
+.navButtonLike:hover .navTooltip,
+.navButtonLike:focus-visible .navTooltip {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0);
+}
+
+.soonBadge {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 0 7px;
+  border: 1px dashed rgba(17, 19, 24, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  letter-spacing: 0.06em;
+}
+
+.railFooter {
+  display: grid;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px dotted var(--border-strong);
+}
+
+.content {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+}
+
+.mobileBackdrop {
+  display: none;
+}
+
+@media (max-width: 980px) {
+  .shell {
+    padding: 16px;
+  }
+
+  .frame {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .mobileHeader {
+    display: flex;
+  }
+
+  .rail {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    bottom: 12px;
+    z-index: 80;
+    width: min(320px, calc(100vw - 24px));
+    min-height: auto;
+    padding: 18px;
+    border-radius: 24px;
+    transform: translateX(calc(-100% - 18px));
+    transition: transform 180ms ease-out;
+  }
+
+  .railHeader {
+    display: grid;
+    justify-items: start;
+  }
+
+  .menuButton {
+    display: inline-flex;
+  }
+
+  .nav {
+    display: grid;
+    gap: 10px;
+  }
+
+  .railOpen {
+    transform: translateX(0);
+  }
+
+  .mobileBackdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    display: block;
+    border: 0;
+    padding: 0;
+    background: rgba(17, 19, 24, 0.28);
+  }
+
+  .logoLink {
+    justify-content: flex-start;
+    gap: 10px;
+  }
+
+  .logoWordmark,
+  .railCopy,
+  .navLabel {
+    display: inline;
+  }
+
+  .logoWordmark {
+    display: inline-flex;
+  }
+
+  .railCopy {
+    display: block;
+  }
+
+  .navLink,
+  .navButtonLike {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    justify-content: initial;
+    gap: 12px;
+    padding: 0 14px;
+  }
+
+  .navLabel {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .navMeta {
+    display: none;
+  }
+
+  .navTitle {
+    display: block;
+  }
+
+  .navTooltip {
+    display: none;
+  }
+
+  .soonBadge {
+    position: static;
+    min-height: 24px;
+  }
+
+  .navIcon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .navSection {
+    gap: 10px;
+  }
+}
