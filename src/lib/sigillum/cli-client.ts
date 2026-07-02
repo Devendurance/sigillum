@@ -9,6 +9,7 @@ import type {
 } from "./lifecycle.ts";
 
 type HexString = `0x${string}`;
+type AddressString = `0x${string}`;
 
 export type SigillumCliPaymentSummary = {
   amount: string;
@@ -29,6 +30,25 @@ export type SigillumInspectResult = {
   payment: SigillumCliPaymentSummary;
   receipt: SigillumReceipt;
   agent_decision: AgentDecision;
+};
+
+export type SigillumBalanceSnapshot = {
+  role: "buyer" | "seller";
+  address: AddressString;
+  chain: SupportedChainName;
+  rpcUrl: string;
+  wallet: {
+    formatted: string;
+  };
+  gateway:
+    | {
+        total: string;
+        available: string;
+        withdrawing: string;
+        withdrawable: string;
+      }
+    | null;
+  gatewayStatusMessage: string;
 };
 
 type InspectSuccess = {
@@ -287,42 +307,50 @@ export function createSigillumClient(options: CreateSigillumClientOptions) {
 export function loadSigillumEnvFiles({
   fs,
   path,
+  searchDirs,
 }: {
   fs: typeof import("node:fs");
   path: typeof import("node:path");
+  searchDirs?: string[];
 }) {
-  for (const fileName of [".env.local", ".env"]) {
-    const filePath = path.join(process.cwd(), fileName);
-    if (!fs.existsSync(filePath)) {
-      continue;
-    }
+  const directories = Array.from(
+    new Set([...(searchDirs ?? []), process.cwd()].map((dir) => path.resolve(dir))),
+  );
 
-    const contents = fs.readFileSync(filePath, "utf8");
-    for (const line of contents.split(/\r?\n/)) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith("#")) {
+  for (const directory of directories) {
+    for (const fileName of [".env.local", ".env"]) {
+      const filePath = path.join(directory, fileName);
+      if (!fs.existsSync(filePath)) {
         continue;
       }
 
-      const separator = trimmed.indexOf("=");
-      if (separator <= 0) {
-        continue;
-      }
+      const contents = fs.readFileSync(filePath, "utf8");
+      for (const line of contents.split(/\r?\n/)) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith("#")) {
+          continue;
+        }
 
-      const key = trimmed.slice(0, separator).trim();
-      if (!key || process.env[key] !== undefined) {
-        continue;
-      }
+        const separator = trimmed.indexOf("=");
+        if (separator <= 0) {
+          continue;
+        }
 
-      let value = trimmed.slice(separator + 1).trim();
-      if (
-        (value.startsWith("\"") && value.endsWith("\"")) ||
-        (value.startsWith("'") && value.endsWith("'"))
-      ) {
-        value = value.slice(1, -1);
-      }
+        const key = trimmed.slice(0, separator).trim();
+        if (!key || process.env[key] !== undefined) {
+          continue;
+        }
 
-      process.env[key] = value;
+        let value = trimmed.slice(separator + 1).trim();
+        if (
+          (value.startsWith("\"") && value.endsWith("\"")) ||
+          (value.startsWith("'") && value.endsWith("'"))
+        ) {
+          value = value.slice(1, -1);
+        }
+
+        process.env[key] = value;
+      }
     }
   }
 }
@@ -336,6 +364,68 @@ export function readEnv(...keys: string[]): string | undefined {
   }
 
   return undefined;
+}
+
+export async function getSigillumBalanceSnapshot(
+  role: "buyer" | "seller",
+): Promise<SigillumBalanceSnapshot> {
+  const gateway = await createGatewayClientFromEnv({
+    phase: "balance",
+    requireRpcUrl: true,
+  });
+  const targetAddress =
+    role === "buyer" ? gateway.address : readRequiredSigillumAddress("X402_SELLER_WALLET_ADDRESS", "X402_SELLER_ADDRESS");
+
+  const wallet = await gateway.getUsdcBalance(targetAddress);
+
+  try {
+    const balances = await gateway.getBalances(targetAddress);
+    return {
+      role,
+      address: targetAddress,
+      chain: gateway.getChainName(),
+      rpcUrl: readRequiredEnv(
+        "balance",
+        "X402_RPC_URL",
+        "SIGILLUM_BUYER_RPC_URL",
+      ),
+      wallet: {
+        formatted: balances.wallet.formatted,
+      },
+      gateway: {
+        total: balances.gateway.formattedTotal,
+        available: balances.gateway.formattedAvailable,
+        withdrawing: balances.gateway.formattedWithdrawing,
+        withdrawable: balances.gateway.formattedWithdrawable,
+      },
+      gatewayStatusMessage: "Gateway balance available.",
+    };
+  } catch (error) {
+    if (isMissingGatewayBalanceError(error)) {
+      return {
+        role,
+        address: targetAddress,
+        chain: gateway.getChainName(),
+        rpcUrl: readRequiredEnv(
+          "balance",
+          "X402_RPC_URL",
+          "SIGILLUM_BUYER_RPC_URL",
+        ),
+        wallet: {
+          formatted: wallet.formatted,
+        },
+        gateway: null,
+        gatewayStatusMessage:
+          "No Gateway balance found yet for this address. Deposit USDC into Gateway and retry after the provider updates the ledger.",
+      };
+    }
+
+    throw new SigillumCliError(
+      "balance",
+      "Failed to fetch Gateway balance.",
+      error instanceof Error ? error.message : String(error),
+    );
+  }
 }
 
 function toInspectResult({
@@ -407,18 +497,28 @@ export function buildDeployActionEnvelope(
   };
 }
 
-async function createGatewayClientFromEnv() {
+async function createGatewayClientFromEnv(options?: {
+  phase?: "payment" | "balance";
+  requireRpcUrl?: boolean;
+}) {
+  const phase = options?.phase ?? "payment";
   const privateKey = readEnv("SIGILLUM_BUYER_PRIVATE_KEY", "X402_BUYER_PRIVATE_KEY");
   if (!privateKey) {
     throw new SigillumCliError(
-      "payment",
-      "Buyer private key is required for the x402 payment flow.",
-      "Set X402_BUYER_PRIVATE_KEY or SIGILLUM_BUYER_PRIVATE_KEY.",
+      phase,
+      phase === "payment"
+        ? "Buyer private key is required for the x402 payment flow."
+        : "A private key is required to query balances through the Gateway client.",
+      phase === "payment"
+        ? "Set X402_BUYER_PRIVATE_KEY or SIGILLUM_BUYER_PRIVATE_KEY."
+        : "Set X402_BUYER_PRIVATE_KEY or SIGILLUM_BUYER_PRIVATE_KEY. A seller private key is not required for seller-side read-only checks.",
     );
   }
 
   const chain = (readEnv("SIGILLUM_BUYER_CHAIN", "X402_NETWORK") || "arcTestnet") as SupportedChainName;
-  const rpcUrl = readEnv("SIGILLUM_BUYER_RPC_URL", "X402_RPC_URL");
+  const rpcUrl = options?.requireRpcUrl
+    ? readRequiredEnv(phase, "SIGILLUM_BUYER_RPC_URL", "X402_RPC_URL")
+    : readEnv("SIGILLUM_BUYER_RPC_URL", "X402_RPC_URL");
 
   return new GatewayClient({
     chain,
@@ -432,13 +532,25 @@ function normalizeBaseUrl(value: string): string {
 }
 
 async function postJson(url: string, body: unknown): Promise<Response> {
-  return fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  try {
+    return await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    throw new SigillumCliError(
+      "runtime",
+      `Could not reach the Sigillum API at ${url}.`,
+      [
+        `Check X402_API_BASE_URL or SIGILLUM_BASE_URL in .env.local.`,
+        `If the URL is correct, make sure the Next.js app is running and that server-side env such as DATABASE_URL, SUPABASE_URL, and SUPABASE_SERVICE_ROLE_KEY are present so the API can boot successfully.`,
+        `Underlying error: ${error instanceof Error ? error.message : String(error)}`,
+      ].join(" "),
+    );
+  }
 }
 
 async function safeJson(response: Response): Promise<unknown> {
@@ -476,4 +588,41 @@ function readNestedString(
 
 function normalizeTransactionHash(value: string | undefined) {
   return value && /^0x[a-fA-F0-9]{64}$/.test(value) ? value : undefined;
+}
+
+function readRequiredEnv(phase: string, ...keys: string[]) {
+  const value = readEnv(...keys);
+  if (value) {
+    return value;
+  }
+
+  throw new SigillumCliError(
+    phase,
+    `Missing required environment value: ${keys[0]}.`,
+    `Set one of: ${keys.join(", ")}.`,
+  );
+}
+
+function readRequiredSigillumAddress(...keys: string[]) {
+  const value = readRequiredEnv("balance", ...keys);
+  if (/^0x[a-fA-F0-9]{40}$/.test(value)) {
+    return value as AddressString;
+  }
+
+  throw new SigillumCliError(
+    "balance",
+    `Invalid address value for ${keys[0]}.`,
+    `Expected a 0x-prefixed 40-hex-character address. Received: ${value}`,
+  );
+}
+
+function isMissingGatewayBalanceError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return (
+    error.message.includes("returned no balances") ||
+    error.message.includes("No Gateway balance found")
+  );
 }

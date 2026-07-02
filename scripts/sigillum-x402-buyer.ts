@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 type ParsedArgs = {
   allowDemoConfirm: boolean;
@@ -12,7 +13,8 @@ const DEFAULT_BASE_URL = "http://localhost:3000";
 
 async function main() {
   const cliClient = await import(new URL("../src/lib/sigillum/cli-client.ts", import.meta.url).href);
-  cliClient.loadSigillumEnvFiles({ fs, path });
+  const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+  cliClient.loadSigillumEnvFiles({ fs, path, searchDirs: [process.cwd(), projectRoot] });
 
   try {
     const args = parseArgs(process.argv.slice(2));
@@ -107,7 +109,14 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 function resolveDiff(args: ParsedArgs): string {
   if (args.diffFile) {
-    return fs.readFileSync(path.resolve(process.cwd(), args.diffFile), "utf8");
+    const resolvedDiffPath = path.resolve(process.cwd(), args.diffFile);
+    if (!fs.existsSync(resolvedDiffPath)) {
+      throw new Error(
+        `Diff file not found: ${args.diffFile}. Resolved path: ${resolvedDiffPath}. Pass a path relative to ${process.cwd()} or use an absolute path.`,
+      );
+    }
+
+    return fs.readFileSync(resolvedDiffPath, "utf8");
   }
 
   if (args.diff && args.diff.trim()) {

@@ -13,6 +13,8 @@
     "sigillum:backfill-transaction-hashes": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/sigillum-backfill-transaction-hashes.ts",
     "sigillum": "node --experimental-strip-types scripts/sigillum-cli.ts",
     "x402:buyer": "node --experimental-strip-types scripts/sigillum-x402-buyer.ts",
+    "x402:buyer:balance": "node --experimental-strip-types scripts/sigillum-x402-balance.ts --role buyer",
+    "x402:seller:balance": "node --experimental-strip-types scripts/sigillum-x402-balance.ts --role seller",
     "sigillum:agent:code-change": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/sigillum-code-change-agent.ts",
     "sigillum:agent:dependency-install": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/sigillum-dependency-install-agent.ts",
     "sigillum:agent:deploy-action": "node --experimental-strip-types --experimental-specifier-resolution=node scripts/sigillum-deploy-action-agent.ts"

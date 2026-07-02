@@ -43,6 +43,47 @@ Optional buyer env vars:
 - `X402_BUYER_AUTO_DEPOSIT_USDC`
 - the local harness also accepts the older `SIGILLUM_BASE_URL`, `SIGILLUM_BUYER_PRIVATE_KEY`, `SIGILLUM_BUYER_CHAIN`, and `SIGILLUM_BUYER_RPC_URL` aliases
 
+## Balance checks
+
+Use the operator-facing balance commands to verify both sides of the x402 flow:
+
+```bash
+npm.cmd run x402:buyer:balance
+npm.cmd run x402:seller:balance
+```
+
+Each command prints:
+
+- the address checked
+- the Arc testnet network and RPC context
+- wallet USDC balance
+- Gateway balance details
+- a status line explaining whether Gateway balance is available yet
+
+Expected output shape:
+
+```text
+SUCCESS
+role=buyer | address=0x... | network=arcTestnet | rpc=https://rpc.testnet.arc.network
+wallet_usdc=1.234567
+gateway_total_usdc=1.000000 | gateway_available_usdc=1.000000 | gateway_withdrawing_usdc=0.000000 | gateway_withdrawable_usdc=0.000000
+status=Gateway balance available.
+```
+
+If Gateway has not recorded a balance for that address yet, the command remains truthful and prints a status like:
+
+`No Gateway balance found yet for this address. Deposit USDC into Gateway and retry after the provider updates the ledger.`
+
+## Topping up the buyer Gateway balance
+
+The easiest way to add more USDC to the buyer-side Gateway balance is:
+
+1. set `X402_BUYER_AUTO_DEPOSIT_USDC=<amount>`
+2. run one real buyer flow such as `npm.cmd run x402:buyer -- --diff-file .\\.sigillum-live.diff`
+3. re-run `npm.cmd run x402:buyer:balance`
+
+That env var is only for real payment runs. Passive balance checks do not auto-deposit.
+
 Seller-side env placeholders:
 
 - `X402_NETWORK=arcTestnet`
